@@ -1,21 +1,28 @@
 # XPlay
 
-Grundgerüst einer macOS-Menüleisten-App zum Bauen und Starten von Xcode-Projekten.
-Die Menüleiste zeigt ein Play-Symbol und während eines Builds einen animierten
-Spinner.
+XPlay is a macOS menu bar app for building and launching Xcode projects without
+keeping Xcode open.
 
-Aktuell ist noch kein Projekt konfiguriert. Deshalb ist der Play-Button zunächst
-deaktiviert. Projekte und Schemes sollen im nächsten Schritt über die App verwaltet
-und ausgewählt werden.
+This initial prototype displays a Play icon in the menu bar and replaces it with
+an animated spinner while a project is building. No project can be configured
+yet, so the Play button starts disabled. Project and scheme management will be
+added next.
 
-## Projekt erzeugen
+## Requirements
+
+- macOS 15 or later
+- Xcode
+- [XcodeGen](https://github.com/yonaskolb/XcodeGen) when regenerating the
+  checked-in Xcode project
+
+## Generate the Xcode project
 
 ```sh
 xcodegen generate
 open XPlay.xcodeproj
 ```
 
-## Testen
+## Test
 
 ```sh
 xcodebuild test \
@@ -24,3 +31,7 @@ xcodebuild test \
   -destination 'platform=macOS' \
   -derivedDataPath /tmp/XPlayDerivedData
 ```
+
+## License
+
+XPlay is available under the [MIT License](LICENSE).
