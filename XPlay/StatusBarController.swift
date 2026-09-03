@@ -2,9 +2,85 @@ import AppKit
 
 @MainActor
 final class StatusBarController: NSObject {
+    enum Interaction: Equatable {
+        case startProject
+        case showContextMenu
+    }
+
     private let statusItem: NSStatusItem
     private let progressIndicator: NSProgressIndicator
     private let launcher: XcodeProjectLauncher?
+    private var isRunning = false
+
+    private(set) lazy var contextMenu: NSMenu = {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        let projectItem = NSMenuItem(
+            title: launcher?.plan.productName ?? "No project selected",
+            action: nil,
+            keyEquivalent: ""
+        )
+        projectItem.isEnabled = false
+        menu.addItem(projectItem)
+        menu.addItem(.separator())
+
+        menu.addItem(makeProjectsHeaderItem())
+
+        let projectsPlaceholderItem = NSMenuItem(
+            title: "No projects yet",
+            action: nil,
+            keyEquivalent: ""
+        )
+        projectsPlaceholderItem.isEnabled = false
+        projectsPlaceholderItem.indentationLevel = 1
+        menu.addItem(projectsPlaceholderItem)
+        menu.addItem(.separator())
+
+        let quitItem = NSMenuItem(
+            title: "Quit",
+            action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"
+        )
+        quitItem.target = NSApp
+        quitItem.isEnabled = true
+        menu.addItem(quitItem)
+
+        return menu
+    }()
+
+    private func makeProjectsHeaderItem() -> NSMenuItem {
+        let item = NSMenuItem(title: "Projects", action: nil, keyEquivalent: "")
+        item.isEnabled = false
+
+        let headerView = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 28))
+        headerView.autoresizingMask = [.width]
+
+        let titleLabel = NSTextField(labelWithString: "Projects")
+        titleLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+        titleLabel.textColor = .secondaryLabelColor
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let editButton = NSButton(title: "Edit", target: nil, action: nil)
+        editButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        editButton.isBordered = false
+        editButton.isEnabled = false
+        editButton.translatesAutoresizingMaskIntoConstraints = false
+
+        headerView.addSubview(titleLabel)
+        headerView.addSubview(editButton)
+
+        NSLayoutConstraint.activate([
+            titleLabel.leadingAnchor.constraint(equalTo: headerView.leadingAnchor, constant: 12),
+            titleLabel.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
+            editButton.trailingAnchor.constraint(equalTo: headerView.trailingAnchor, constant: -8),
+            editButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: editButton.leadingAnchor, constant: -8),
+        ])
+
+        item.view = headerView
+        return item
+    }
 
     init(launcher: XcodeProjectLauncher? = nil) {
         self.launcher = launcher
@@ -17,13 +93,14 @@ final class StatusBarController: NSObject {
             return
         }
 
-        button.image = menuBarImage(named: "play.fill", description: "Projekt starten")
-        button.isEnabled = launcher != nil
-        button.setAccessibilityLabel(launcher == nil ? "Kein Projekt ausgewählt" : "Projekt starten")
-        button.toolTip = launcher == nil ? "Kein Projekt ausgewählt" : "Projekt starten"
+        button.image = menuBarImage(named: "play.fill", description: "Start project")
+        button.setAccessibilityLabel(
+            launcher == nil ? "No project selected. Right-click for menu" : "Start project"
+        )
+        button.toolTip = launcher == nil ? "No project selected · Right-click for menu" : "Start project"
         button.target = self
-        button.action = #selector(startProject)
-        button.sendAction(on: [.leftMouseUp])
+        button.action = #selector(handleStatusItemClick)
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
 
         progressIndicator.style = .spinning
         progressIndicator.controlSize = .small
@@ -38,9 +115,36 @@ final class StatusBarController: NSObject {
         ])
     }
 
+    static func interaction(for eventType: NSEvent.EventType) -> Interaction? {
+        switch eventType {
+        case .leftMouseUp:
+            return .startProject
+        case .rightMouseUp:
+            return .showContextMenu
+        default:
+            return nil
+        }
+    }
+
     @objc
+    private func handleStatusItemClick() {
+        guard
+            let eventType = NSApp.currentEvent?.type,
+            let interaction = Self.interaction(for: eventType)
+        else {
+            return
+        }
+
+        switch interaction {
+        case .startProject:
+            startProject()
+        case .showContextMenu:
+            showContextMenu()
+        }
+    }
+
     private func startProject() {
-        guard let launcher else {
+        guard !isRunning, let launcher else {
             return
         }
 
@@ -61,30 +165,36 @@ final class StatusBarController: NSObject {
         }
     }
 
-    private func setRunning(_ isRunning: Bool) {
+    private func showContextMenu() {
+        statusItem.menu = contextMenu
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil
+    }
+
+    private func setRunning(_ running: Bool) {
         guard let button = statusItem.button else {
             return
         }
 
-        button.isEnabled = !isRunning && launcher != nil
-        button.setAccessibilityLabel(isRunning ? "Projekt wird gestartet" : "Projekt starten")
-        button.toolTip = isRunning ? "Projekt wird gebaut und gestartet …" : "Projekt starten"
+        isRunning = running
+        button.setAccessibilityLabel(running ? "Project is starting" : "Start project")
+        button.toolTip = running ? "Building and launching project…" : "Start project"
 
-        if isRunning {
+        if running {
             button.image = nil
             progressIndicator.startAnimation(nil)
         } else {
             progressIndicator.stopAnimation(nil)
-            button.image = menuBarImage(named: "play.fill", description: "Projekt starten")
+            button.image = menuBarImage(named: "play.fill", description: "Start project")
         }
     }
 
     private func showFailure(_ error: Error, logURL: URL) {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Das Projekt konnte nicht gestartet werden"
+        alert.messageText = "The project could not be launched"
         alert.informativeText = error.localizedDescription
-        alert.addButton(withTitle: "Build-Log öffnen")
+        alert.addButton(withTitle: "Open Build Log")
         alert.addButton(withTitle: "OK")
 
         if alert.runModal() == .alertFirstButtonReturn {

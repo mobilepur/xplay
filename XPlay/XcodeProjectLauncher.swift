@@ -10,11 +10,11 @@ final class XcodeProjectLauncher: @unchecked Sendable {
         var errorDescription: String? {
             switch self {
             case let .projectMissing(url):
-                return "Das Xcode-Projekt wurde nicht gefunden: \(url.path)"
+                return "The Xcode project could not be found: \(url.path)"
             case let .buildFailed(status, logURL):
-                return "Der Build ist mit Status \(status) fehlgeschlagen. Details stehen in \(logURL.path)."
+                return "The build failed with status \(status). See \(logURL.path) for details."
             case let .productMissing(url):
-                return "Der Build war erfolgreich, aber \(url.path) wurde nicht gefunden."
+                return "The build succeeded, but \(url.path) could not be found."
             }
         }
     }

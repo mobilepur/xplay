@@ -7,11 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		12C3305174FED64AC9FCA365 /* XcodeProjectLaunchPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99A36F70A24E2A6B0C95D9B3 /* XcodeProjectLaunchPlan.swift */; };
 		12EEC989E2D4952C533CBE2D /* XPlayApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBC3158E7140F16D9947921D /* XPlayApp.swift */; };
 		3E6D6F3FC34DAB0150EA36DB /* StatusBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F448FE2168DEBB85BD5F9471 /* StatusBarController.swift */; };
-		48FA494AC3A02146E4F050C0 /* XcodeProjectLaunchPlanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DDFB8D85BE59CAEE18F4484 /* XcodeProjectLaunchPlanTests.swift */; };
-		68A8472BE69A3691C5C249FD /* XcodeProjectLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E20F6AA31AF93113BC6E959 /* XcodeProjectLauncher.swift */; };
-		8F6C3097CDA580D77448D69E /* XcodeProjectLaunchPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42F0C90C1B00B3A576A0B9DD /* XcodeProjectLaunchPlan.swift */; };
+		931DC3D906167923D1E16126 /* XcodeProjectLaunchPlanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 292743F064E984E74A232BBD /* XcodeProjectLaunchPlanTests.swift */; };
+		BB1245326FBD2D4E230BDD11 /* XcodeProjectLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC69C186693180A3D8E01C5D /* XcodeProjectLauncher.swift */; };
+		D1D3FEB4B093FFE7A54DA17A /* StatusBarControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 131FEE22EB09A9463AE7ADED /* StatusBarControllerTests.swift */; };
 		E15E1595BB0A43342BE130B6 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D0EEBA2BC9E2B8F992A9CA8 /* AppDelegate.swift */; };
 /* End PBXBuildFile section */
 
@@ -27,10 +28,11 @@
 
 /* Begin PBXFileReference section */
 		0D0EEBA2BC9E2B8F992A9CA8 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
-		42F0C90C1B00B3A576A0B9DD /* XcodeProjectLaunchPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XcodeProjectLaunchPlan.swift; sourceTree = "<group>"; };
-		4E20F6AA31AF93113BC6E959 /* XcodeProjectLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XcodeProjectLauncher.swift; sourceTree = "<group>"; };
+		131FEE22EB09A9463AE7ADED /* StatusBarControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarControllerTests.swift; sourceTree = "<group>"; };
+		292743F064E984E74A232BBD /* XcodeProjectLaunchPlanTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XcodeProjectLaunchPlanTests.swift; sourceTree = "<group>"; };
 		5CF71FA59D5E445078C7CD25 /* XPlay.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = XPlay.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		6DDFB8D85BE59CAEE18F4484 /* XcodeProjectLaunchPlanTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XcodeProjectLaunchPlanTests.swift; sourceTree = "<group>"; };
+		99A36F70A24E2A6B0C95D9B3 /* XcodeProjectLaunchPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XcodeProjectLaunchPlan.swift; sourceTree = "<group>"; };
+		AC69C186693180A3D8E01C5D /* XcodeProjectLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XcodeProjectLauncher.swift; sourceTree = "<group>"; };
 		B71933D2376D6C6552A48654 /* XPlayTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = XPlayTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F448FE2168DEBB85BD5F9471 /* StatusBarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarController.swift; sourceTree = "<group>"; };
 		FBC3158E7140F16D9947921D /* XPlayApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XPlayApp.swift; sourceTree = "<group>"; };
@@ -40,7 +42,8 @@
 		3181189A243822D008774DD6 /* XPlayTests */ = {
 			isa = PBXGroup;
 			children = (
-				6DDFB8D85BE59CAEE18F4484 /* XcodeProjectLaunchPlanTests.swift */,
+				131FEE22EB09A9463AE7ADED /* StatusBarControllerTests.swift */,
+				292743F064E984E74A232BBD /* XcodeProjectLaunchPlanTests.swift */,
 			);
 			path = XPlayTests;
 			sourceTree = "<group>";
@@ -67,9 +70,9 @@
 			isa = PBXGroup;
 			children = (
 				0D0EEBA2BC9E2B8F992A9CA8 /* AppDelegate.swift */,
-				4E20F6AA31AF93113BC6E959 /* XcodeProjectLauncher.swift */,
-				42F0C90C1B00B3A576A0B9DD /* XcodeProjectLaunchPlan.swift */,
 				F448FE2168DEBB85BD5F9471 /* StatusBarController.swift */,
+				AC69C186693180A3D8E01C5D /* XcodeProjectLauncher.swift */,
+				99A36F70A24E2A6B0C95D9B3 /* XcodeProjectLaunchPlan.swift */,
 				FBC3158E7140F16D9947921D /* XPlayApp.swift */,
 			);
 			path = XPlay;
@@ -150,10 +153,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				E15E1595BB0A43342BE130B6 /* AppDelegate.swift in Sources */,
-				8F6C3097CDA580D77448D69E /* XcodeProjectLaunchPlan.swift in Sources */,
-				68A8472BE69A3691C5C249FD /* XcodeProjectLauncher.swift in Sources */,
 				3E6D6F3FC34DAB0150EA36DB /* StatusBarController.swift in Sources */,
 				12EEC989E2D4952C533CBE2D /* XPlayApp.swift in Sources */,
+				12C3305174FED64AC9FCA365 /* XcodeProjectLaunchPlan.swift in Sources */,
+				BB1245326FBD2D4E230BDD11 /* XcodeProjectLauncher.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -161,7 +164,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				48FA494AC3A02146E4F050C0 /* XcodeProjectLaunchPlanTests.swift in Sources */,
+				D1D3FEB4B093FFE7A54DA17A /* StatusBarControllerTests.swift in Sources */,
+				931DC3D906167923D1E16126 /* XcodeProjectLaunchPlanTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
