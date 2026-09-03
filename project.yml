@@ -1,0 +1,46 @@
+name: XPlay
+options:
+  bundleIdPrefix: de.mobilepur
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+
+targets:
+  XPlay:
+    type: application
+    platform: macOS
+    sources:
+      - XPlay
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: de.mobilepur.XPlay
+        PRODUCT_NAME: XPlay
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: XPlay
+        INFOPLIST_KEY_LSUIElement: YES
+        ENABLE_HARDENED_RUNTIME: YES
+        ENABLE_APP_SANDBOX: NO
+
+  XPlayTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - XPlayTests
+    dependencies:
+      - target: XPlay
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: de.mobilepur.XPlayTests
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  XPlay:
+    build:
+      targets:
+        XPlay: all
+        XPlayTests: [test]
+    test:
+      targets:
+        - XPlayTests
