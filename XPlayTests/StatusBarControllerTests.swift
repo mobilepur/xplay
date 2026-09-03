@@ -13,7 +13,10 @@ final class StatusBarControllerTests: XCTestCase {
 
     @MainActor
     func testContextMenuShowsProjectsSectionAndQuitAction() throws {
-        let controller = StatusBarController()
+        var didRequestProjectEditor = false
+        let controller = StatusBarController(
+            onEditProjects: { didRequestProjectEditor = true }
+        )
         let items = controller.contextMenu.items
 
         XCTAssertEqual(
@@ -30,10 +33,33 @@ final class StatusBarControllerTests: XCTestCase {
 
         XCTAssertEqual(titleLabel.stringValue, "Projects")
         XCTAssertEqual(editButton.title, "Edit")
-        XCTAssertFalse(editButton.isEnabled)
+        XCTAssertTrue(items[2].isEnabled)
+        XCTAssertTrue(editButton.isEnabled)
+        editButton.performClick(nil)
+        XCTAssertTrue(didRequestProjectEditor)
         XCTAssertFalse(items[0].isEnabled)
         XCTAssertFalse(items[3].isEnabled)
         XCTAssertTrue(items[5].isEnabled)
         XCTAssertEqual(items[5].keyEquivalent, "q")
+    }
+
+    @MainActor
+    func testContextMenuShowsSelectedSavedProject() {
+        let suiteName = "StatusBarControllerTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        let catalog = ProjectCatalog(defaults: defaults, storageKey: "projects")
+        catalog.add(URL(fileURLWithPath: "/Projects/Example.xcodeproj"))
+
+        let controller = StatusBarController(projectCatalog: catalog)
+        let items = controller.contextMenu.items
+
+        XCTAssertEqual(
+            items.map(\.title),
+            ["Example", "", "Projects", "Example", "", "Quit"]
+        )
+        XCTAssertEqual(items[3].state, .on)
     }
 }

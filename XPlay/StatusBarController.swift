@@ -10,14 +10,18 @@ final class StatusBarController: NSObject {
     private let statusItem: NSStatusItem
     private let progressIndicator: NSProgressIndicator
     private let launcher: XcodeProjectLauncher?
+    private let projectCatalog: ProjectCatalog?
+    private let onEditProjects: (() -> Void)?
     private var isRunning = false
 
-    private(set) lazy var contextMenu: NSMenu = {
+    private(set) lazy var contextMenu = makeContextMenu()
+
+    private func makeContextMenu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
 
         let projectItem = NSMenuItem(
-            title: launcher?.plan.productName ?? "No project selected",
+            title: projectCatalog?.selectedProject?.name ?? launcher?.plan.productName ?? "No project selected",
             action: nil,
             keyEquivalent: ""
         )
@@ -27,14 +31,29 @@ final class StatusBarController: NSObject {
 
         menu.addItem(makeProjectsHeaderItem())
 
-        let projectsPlaceholderItem = NSMenuItem(
-            title: "No projects yet",
-            action: nil,
-            keyEquivalent: ""
-        )
-        projectsPlaceholderItem.isEnabled = false
-        projectsPlaceholderItem.indentationLevel = 1
-        menu.addItem(projectsPlaceholderItem)
+        if let projects = projectCatalog?.projects, !projects.isEmpty {
+            for (index, project) in projects.enumerated() {
+                let item = NSMenuItem(
+                    title: project.name,
+                    action: #selector(selectProject(_:)),
+                    keyEquivalent: ""
+                )
+                item.target = self
+                item.tag = index
+                item.state = project == projectCatalog?.selectedProject ? .on : .off
+                item.isEnabled = true
+                menu.addItem(item)
+            }
+        } else {
+            let projectsPlaceholderItem = NSMenuItem(
+                title: "No projects yet",
+                action: nil,
+                keyEquivalent: ""
+            )
+            projectsPlaceholderItem.isEnabled = false
+            projectsPlaceholderItem.indentationLevel = 1
+            menu.addItem(projectsPlaceholderItem)
+        }
         menu.addItem(.separator())
 
         let quitItem = NSMenuItem(
@@ -47,11 +66,11 @@ final class StatusBarController: NSObject {
         menu.addItem(quitItem)
 
         return menu
-    }()
+    }
 
     private func makeProjectsHeaderItem() -> NSMenuItem {
         let item = NSMenuItem(title: "Projects", action: nil, keyEquivalent: "")
-        item.isEnabled = false
+        item.isEnabled = onEditProjects != nil
 
         let headerView = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 28))
         headerView.autoresizingMask = [.width]
@@ -64,7 +83,9 @@ final class StatusBarController: NSObject {
         let editButton = NSButton(title: "Edit", target: nil, action: nil)
         editButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         editButton.isBordered = false
-        editButton.isEnabled = false
+        editButton.target = self
+        editButton.action = #selector(editProjects)
+        editButton.isEnabled = onEditProjects != nil
         editButton.translatesAutoresizingMaskIntoConstraints = false
 
         headerView.addSubview(titleLabel)
@@ -82,8 +103,14 @@ final class StatusBarController: NSObject {
         return item
     }
 
-    init(launcher: XcodeProjectLauncher? = nil) {
+    init(
+        launcher: XcodeProjectLauncher? = nil,
+        projectCatalog: ProjectCatalog? = nil,
+        onEditProjects: (() -> Void)? = nil
+    ) {
         self.launcher = launcher
+        self.projectCatalog = projectCatalog
+        self.onEditProjects = onEditProjects
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         progressIndicator = NSProgressIndicator()
 
@@ -166,9 +193,22 @@ final class StatusBarController: NSObject {
     }
 
     private func showContextMenu() {
+        contextMenu = makeContextMenu()
         statusItem.menu = contextMenu
         statusItem.button?.performClick(nil)
         statusItem.menu = nil
+    }
+
+    @objc
+    private func editProjects() {
+        contextMenu.cancelTracking()
+        onEditProjects?()
+    }
+
+    @objc
+    private func selectProject(_ item: NSMenuItem) {
+        projectCatalog?.selectProject(at: item.tag)
+        contextMenu = makeContextMenu()
     }
 
     private func setRunning(_ running: Bool) {

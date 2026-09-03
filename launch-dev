@@ -1,0 +1,19 @@
+#!/bin/sh
+
+set -eu
+
+repository_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+derived_data_path=${XPLAY_DERIVED_DATA_PATH:-/tmp/XPlayDerivedData}
+app_path="$derived_data_path/Build/Products/Debug/XPlay.app"
+
+cd "$repository_root"
+
+xcodebuild build \
+    -project XPlay.xcodeproj \
+    -scheme XPlay \
+    -configuration Debug \
+    -destination 'platform=macOS' \
+    -derivedDataPath "$derived_data_path"
+
+pkill -x XPlay 2>/dev/null || true
+open -n "$app_path"
