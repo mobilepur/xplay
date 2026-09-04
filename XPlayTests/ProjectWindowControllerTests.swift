@@ -18,7 +18,7 @@ final class ProjectWindowControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testWindowUsesWorkspaceAndSchemeConfigurationLayout() throws {
+    func testWindowUsesWorkspaceDrilldownLayout() throws {
         try withCatalog { catalog in
             catalog.add(URL(fileURLWithPath: "/Projects/Example.xcworkspace"))
             let controller = ProjectWindowController(catalog: catalog)
@@ -33,8 +33,13 @@ final class ProjectWindowControllerTests: XCTestCase {
             let contentView = try XCTUnwrap(controller.window?.contentView)
             XCTAssertTrue(
                 descendants(of: NSTextField.self, in: contentView)
-                    .contains { $0.stringValue == "Schemes" }
+                    .contains { $0.stringValue == "Launch Configurations" }
             )
+            let splitView = try XCTUnwrap(descendants(of: NSSplitView.self, in: contentView).first)
+            XCTAssertTrue(splitView.isVertical)
+            XCTAssertEqual(splitView.arrangedSubviews.count, 2)
+            XCTAssertTrue(controller.projectTableView.isDescendant(of: splitView.arrangedSubviews[0]))
+            XCTAssertTrue(controller.schemeTableView.isDescendant(of: splitView.arrangedSubviews[1]))
             XCTAssertFalse(
                 descendants(of: NSButton.self, in: contentView)
                     .contains { $0.title == "Accept Macros" }
@@ -57,6 +62,47 @@ final class ProjectWindowControllerTests: XCTestCase {
             XCTAssertFalse(panel.canChooseDirectories)
             XCTAssertFalse(panel.allowsMultipleSelection)
             XCTAssertEqual(panel.allowedContentTypes.first?.preferredFilenameExtension, "xcworkspace")
+        }
+    }
+
+    @MainActor
+    func testSelectingWorkspaceDrillsIntoItsLaunchConfigurations() throws {
+        try withCatalog { catalog in
+            catalog.add(URL(fileURLWithPath: "/Projects/First.xcworkspace"), schemes: ["First-iOS"])
+            catalog.add(URL(fileURLWithPath: "/Projects/Second.xcworkspace"), schemes: ["Second-macOS"])
+            catalog.selectProject(at: 0)
+            let controller = ProjectWindowController(catalog: catalog)
+            controller.loadWindow()
+            let contentView = try XCTUnwrap(controller.window?.contentView)
+
+            let firstCell = try XCTUnwrap(controller.tableView(
+                controller.projectTableView,
+                viewFor: controller.projectTableView.tableColumns[0],
+                row: 0
+            ))
+            XCTAssertNotNil(firstCell.subviews.first {
+                $0.identifier?.rawValue == "WorkspaceDrilldown"
+            })
+            controller.projectTableView.selectRowIndexes(
+                IndexSet(integer: 1), byExtendingSelection: false
+            )
+            controller.tableViewSelectionDidChange(Notification(
+                name: NSTableView.selectionDidChangeNotification,
+                object: controller.projectTableView
+            ))
+
+            XCTAssertTrue(descendants(of: NSTextField.self, in: contentView).contains {
+                $0.identifier?.rawValue == "WorkspaceDetailTitle" && $0.stringValue == "Second"
+            })
+            XCTAssertEqual(controller.schemeTableView.numberOfRows, 1)
+            let schemeCell = try XCTUnwrap(controller.tableView(
+                controller.schemeTableView,
+                viewFor: controller.schemeTableView.tableColumns[0],
+                row: 0
+            ))
+            XCTAssertTrue(descendants(of: NSButton.self, in: schemeCell).contains {
+                $0.title == "Second-macOS"
+            })
         }
     }
 

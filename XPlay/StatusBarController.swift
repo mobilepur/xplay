@@ -1,16 +1,22 @@
 import AppKit
 
 @MainActor
-private final class ConfigurationMenuItemView: NSView {
-    private let schemeLabel: NSTextField
-    private let destinationLabel: NSTextField
+private final class MenuDetailItemView: NSView {
+    private let titleLabel: NSTextField
+    private let detailLabel: NSTextField
     private let checkmark: NSImageView
     private let chevron: NSImageView
     private var isMenuHighlighted = false
 
-    init(scheme: String, destination: String, isSelectedForPlay: Bool) {
-        schemeLabel = NSTextField(labelWithString: scheme)
-        destinationLabel = NSTextField(labelWithString: destination)
+    init(
+        title: String,
+        detail: String,
+        selection: Bool? = nil,
+        chevronIdentifier: String? = nil,
+        showsChevron: Bool = true
+    ) {
+        titleLabel = NSTextField(labelWithString: title)
+        detailLabel = NSTextField(labelWithString: detail)
         checkmark = NSImageView()
         chevron = NSImageView()
 
@@ -23,29 +29,38 @@ private final class ConfigurationMenuItemView: NSView {
             systemSymbolName: "checkmark",
             accessibilityDescription: nil
         )
-        checkmark.isHidden = !isSelectedForPlay
+        checkmark.isHidden = selection != true
         checkmark.translatesAutoresizingMaskIntoConstraints = false
 
-        schemeLabel.font = .menuFont(ofSize: NSFont.systemFontSize)
-        schemeLabel.lineBreakMode = .byTruncatingTail
-        schemeLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .menuFont(ofSize: NSFont.systemFontSize)
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        destinationLabel.font = .menuFont(ofSize: NSFont.systemFontSize)
-        destinationLabel.alignment = .right
-        destinationLabel.lineBreakMode = .byTruncatingMiddle
-        destinationLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        destinationLabel.translatesAutoresizingMaskIntoConstraints = false
+        detailLabel.font = .menuFont(ofSize: NSFont.systemFontSize)
+        detailLabel.alignment = .right
+        detailLabel.lineBreakMode = .byTruncatingMiddle
+        detailLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        detailLabel.translatesAutoresizingMaskIntoConstraints = false
+        if selection == nil {
+            // Round up so pixel alignment cannot truncate short setting values.
+            detailLabel.widthAnchor.constraint(
+                greaterThanOrEqualToConstant: ceil(detailLabel.intrinsicContentSize.width)
+            ).isActive = true
+        }
 
-        chevron.identifier = NSUserInterfaceItemIdentifier("configuration-chevron")
+        chevron.identifier = NSUserInterfaceItemIdentifier(
+            chevronIdentifier ?? (selection == nil ? "setting-chevron" : "configuration-chevron")
+        )
         chevron.image = NSImage(
             systemSymbolName: "chevron.right",
             accessibilityDescription: nil
         )
+        chevron.isHidden = !showsChevron
         chevron.translatesAutoresizingMaskIntoConstraints = false
 
         addSubview(checkmark)
-        addSubview(schemeLabel)
-        addSubview(destinationLabel)
+        addSubview(titleLabel)
+        addSubview(detailLabel)
         addSubview(chevron)
 
         NSLayoutConstraint.activate([
@@ -53,14 +68,18 @@ private final class ConfigurationMenuItemView: NSView {
             checkmark.centerYAnchor.constraint(equalTo: centerYAnchor),
             checkmark.widthAnchor.constraint(equalToConstant: 12),
             checkmark.heightAnchor.constraint(equalToConstant: 12),
-            schemeLabel.leadingAnchor.constraint(equalTo: checkmark.trailingAnchor, constant: 8),
-            schemeLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            destinationLabel.leadingAnchor.constraint(
-                greaterThanOrEqualTo: schemeLabel.trailingAnchor,
+            selection == nil
+                ? titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12)
+                : titleLabel.leadingAnchor.constraint(equalTo: checkmark.trailingAnchor, constant: 8),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            detailLabel.leadingAnchor.constraint(
+                greaterThanOrEqualTo: titleLabel.trailingAnchor,
                 constant: 12
             ),
-            destinationLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            destinationLabel.trailingAnchor.constraint(equalTo: chevron.leadingAnchor, constant: -8),
+            detailLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            showsChevron
+                ? detailLabel.trailingAnchor.constraint(equalTo: chevron.leadingAnchor, constant: -8)
+                : detailLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             chevron.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             chevron.centerYAnchor.constraint(equalTo: centerYAnchor),
             chevron.widthAnchor.constraint(equalToConstant: 8),
@@ -110,16 +129,28 @@ private final class ConfigurationMenuItemView: NSView {
         let secondaryColor: NSColor = isMenuHighlighted
             ? .selectedMenuItemTextColor
             : .secondaryLabelColor
-        schemeLabel.textColor = primaryColor
-        destinationLabel.textColor = secondaryColor
+        titleLabel.textColor = primaryColor
+        detailLabel.textColor = secondaryColor
         checkmark.contentTintColor = primaryColor
         chevron.contentTintColor = secondaryColor
     }
 }
 
-private final class RunningStatusView: NSStackView {
+private final class StatusDeviceImageView: NSImageView {
+    // Keep symbol-specific optical insets from expanding into the loading dots.
+    override var alignmentRectInsets: NSEdgeInsets {
+        NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+    }
+}
+
+private final class StatusItemView: NSView {
     let iconImageView = NSImageView()
+    private let nameLabel = NSTextField(labelWithString: "")
+    private let destinationImageView = StatusDeviceImageView()
+    private let contentStack = NSStackView()
+    private let dotsView: NSStackView
     private let dots: [NSView]
+    private var dotsCenterConstraint: NSLayoutConstraint?
 
     override init(frame frameRect: NSRect) {
         dots = (0..<3).map { index in
@@ -128,36 +159,63 @@ private final class RunningStatusView: NSStackView {
             dot.wantsLayer = true
             dot.translatesAutoresizingMaskIntoConstraints = false
             NSLayoutConstraint.activate([
-                dot.widthAnchor.constraint(equalToConstant: 3),
-                dot.heightAnchor.constraint(equalToConstant: 3),
+                dot.widthAnchor.constraint(equalToConstant: 2),
+                dot.heightAnchor.constraint(equalToConstant: 2),
             ])
-            dot.layer?.cornerRadius = 1.5
+            dot.layer?.cornerRadius = 1
             return dot
         }
-
+        dotsView = NSStackView(views: dots)
         super.init(frame: frameRect)
-
-        identifier = NSUserInterfaceItemIdentifier("running-indicator")
-        orientation = .horizontal
-        alignment = .centerY
-        spacing = 4
+        identifier = NSUserInterfaceItemIdentifier("status-content")
         translatesAutoresizingMaskIntoConstraints = false
-        isHidden = true
 
-        iconImageView.identifier = NSUserInterfaceItemIdentifier("running-status-icon")
+        contentStack.orientation = .horizontal
+        contentStack.alignment = .centerY
+        contentStack.spacing = 4
+        contentStack.detachesHiddenViews = true
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(contentStack)
+
+        iconImageView.identifier = NSUserInterfaceItemIdentifier("xplay-status-icon")
         iconImageView.imageScaling = .scaleProportionallyDown
+        iconImageView.contentTintColor = .labelColor
         iconImageView.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            iconImageView.widthAnchor.constraint(equalToConstant: 21),
-            iconImageView.heightAnchor.constraint(equalToConstant: 18),
-        ])
-        addArrangedSubview(iconImageView)
+        contentStack.addArrangedSubview(iconImageView)
 
-        let dotsView = NSStackView(views: dots)
+        nameLabel.identifier = NSUserInterfaceItemIdentifier("status-project-name")
+        nameLabel.font = .menuBarFont(ofSize: 13)
+        nameLabel.lineBreakMode = .byTruncatingTail
+        nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        nameLabel.translatesAutoresizingMaskIntoConstraints = false
+        contentStack.addArrangedSubview(nameLabel)
+
+        destinationImageView.identifier = NSUserInterfaceItemIdentifier("destination-status-icon")
+        destinationImageView.imageScaling = .scaleProportionallyDown
+        destinationImageView.contentTintColor = .labelColor
+        destinationImageView.translatesAutoresizingMaskIntoConstraints = false
+        contentStack.addArrangedSubview(destinationImageView)
+
+        dotsView.identifier = NSUserInterfaceItemIdentifier("running-dots")
         dotsView.orientation = .horizontal
         dotsView.alignment = .centerY
-        dotsView.spacing = 3
-        addArrangedSubview(dotsView)
+        dotsView.spacing = 2
+        dotsView.translatesAutoresizingMaskIntoConstraints = false
+        dotsView.isHidden = true
+        addSubview(dotsView)
+
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 22),
+            contentStack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            contentStack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            contentStack.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -1),
+            iconImageView.widthAnchor.constraint(equalToConstant: 21),
+            iconImageView.heightAnchor.constraint(equalToConstant: 18),
+            nameLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 160),
+            destinationImageView.widthAnchor.constraint(equalToConstant: 16),
+            destinationImageView.heightAnchor.constraint(equalToConstant: 14),
+            dotsView.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
         updateDotColors()
     }
 
@@ -166,17 +224,58 @@ private final class RunningStatusView: NSStackView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        nil
-    }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         updateDotColors()
     }
 
+    var showsOnlyLogo: Bool { !iconImageView.isHidden }
+
+    func configure(content: AppSettings.MenuBarContent, projectName: String?, destination: XcodeDestination?) {
+        nameLabel.stringValue = projectName ?? ""
+        nameLabel.isHidden = projectName == nil || (content != .name && content != .nameAndTarget)
+        destinationImageView.isHidden = destination == nil || (content != .target && content != .nameAndTarget)
+        iconImageView.isHidden = !(nameLabel.isHidden && destinationImageView.isHidden)
+        setDestination(destination)
+
+        dotsCenterConstraint?.isActive = false
+        if !destinationImageView.isHidden {
+            dotsCenterConstraint = dotsView.centerXAnchor.constraint(equalTo: contentStack.trailingAnchor, constant: -8)
+        } else {
+            dotsCenterConstraint = dotsView.centerXAnchor.constraint(equalTo: contentStack.centerXAnchor)
+        }
+        dotsCenterConstraint?.isActive = true
+    }
+
+    private func setDestination(_ destination: XcodeDestination?) {
+        destinationImageView.setAccessibilityLabel(destination?.displayName)
+        guard let destination else {
+            destinationImageView.image = nil
+            return
+        }
+        let symbol: String
+        let description: String
+        switch destination.platform {
+        case .macOS:
+            symbol = "desktopcomputer"
+            description = "Mac"
+        case .iOSSimulator where destination.name.localizedCaseInsensitiveContains("iPad"):
+            symbol = "ipad"
+            description = "iPad"
+        case .iOSSimulator where destination.name.localizedCaseInsensitiveContains("iPhone"):
+            symbol = "iphone"
+            description = "iPhone"
+        case .iOSSimulator:
+            symbol = "ipad.and.iphone"
+            description = "iOS Simulator"
+        }
+        destinationImageView.image = NSImage(systemSymbolName: symbol, accessibilityDescription: description)
+    }
+
     func startAnimating() {
-        isHidden = false
+        dotsView.isHidden = false
         for (index, dot) in dots.enumerated() {
             guard let layer = dot.layer else { continue }
             let animation = CAKeyframeAnimation(keyPath: "opacity")
@@ -195,7 +294,7 @@ private final class RunningStatusView: NSStackView {
         for dot in dots {
             dot.layer?.removeAnimation(forKey: "pulse")
         }
-        isHidden = true
+        dotsView.isHidden = true
     }
 
     private func updateDotColors() {
@@ -221,7 +320,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     private(set) var statusItem: NSStatusItem
-    private let runningStatusView: RunningStatusView
+    private let statusItemView: StatusItemView
     private let projectCatalog: ProjectCatalog?
     private let appSettings: AppSettings
     private let onEditProjects: (() -> Void)?
@@ -230,8 +329,13 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private let cacheDirectory: URL
     private let makeLauncher: (XcodeProjectLaunchPlan) -> any ProjectLaunching
     private let presentLaunchFailures: ([LaunchFailure]) -> Void
+    private let appVersion: String?
+    private let openExternalURL: (URL) -> Void
     private var activeLauncher: (any ProjectLaunching)?
     private var isRunning = false
+    private var activeLaunchPlan: XcodeProjectLaunchPlan?
+    private weak var playMenuItem: NSMenuItem?
+    private weak var playMenuButton: NSButton?
 
     private(set) lazy var contextMenu = makeContextMenu()
 
@@ -240,13 +344,9 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         menu.autoenablesItems = false
         menu.delegate = self
 
-        let projectItem = NSMenuItem(
-            title: projectCatalog?.selectedProject?.name ?? "No project selected",
-            action: nil,
-            keyEquivalent: ""
-        )
-        projectItem.isEnabled = false
-        menu.addItem(projectItem)
+        menu.addItem(makeSectionHeaderItem(
+            title: projectCatalog?.selectedProject?.name ?? "No project selected"
+        ))
 
         if let project = projectCatalog?.selectedProject {
             let configurations = project.enabledConfigurations
@@ -261,9 +361,10 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                 )
             }
         }
+        menu.addItem(makePlayItem())
         menu.addItem(.separator())
 
-        menu.addItem(makeProjectsHeaderItem())
+        menu.addItem(makeSectionHeaderItem(title: "Projects", showsEditButton: true))
 
         if let projects = projectCatalog?.projects, !projects.isEmpty {
             for (index, project) in projects.enumerated() {
@@ -290,28 +391,43 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         }
         menu.addItem(.separator())
 
-        let settingsItem = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
-        settingsItem.isEnabled = false
-        menu.addItem(settingsItem)
+        menu.addItem(makeSectionHeaderItem(title: "Settings"))
 
+        menu.addItem(makeChoiceItem(
+            title: "Menu Bar Icon",
+            labels: ["XPlay", "Name + Target", "Name", "Target"],
+            selectedIndex: AppSettings.MenuBarContent.allCases.firstIndex(of: appSettings.menuBarContent)!,
+            action: #selector(setMenuBarContent(_:))
+        ))
+        menu.addItem(makeChoiceItem(
+            title: "Left Click", labels: ["Play", "Menu"],
+            selectedIndex: appSettings.leftClickAction == .play ? 0 : 1,
+            action: #selector(setLeftClickAction(_:))
+        ))
+        menu.addItem(makeChoiceItem(
+            title: "Right Click", labels: ["Play", "Menu"],
+            selectedIndex: appSettings.rightClickAction == .play ? 0 : 1,
+            action: #selector(setRightClickAction(_:))
+        ))
         menu.addItem(makeMacroAcceptanceItem())
         menu.addItem(.separator())
 
-        let quitItem = NSMenuItem(
-            title: "Quit",
-            action: #selector(NSApplication.terminate(_:)),
-            keyEquivalent: "q"
-        )
-        quitItem.target = NSApp
-        quitItem.isEnabled = true
-        menu.addItem(quitItem)
+        menu.addItem(makeSectionHeaderItem(title: "About"))
+        menu.addItem(makeAboutItem())
+        menu.addItem(makeExternalLinkItem(
+            title: "Report a Problem…",
+            url: URL(string: "https://github.com/mobilepur/xplay/issues/new")!
+        ))
+        menu.addItem(.separator())
+
+        menu.addItem(makeQuitItem())
 
         return menu
     }
 
     func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) {
         for menuItem in menu.items {
-            guard let row = menuItem.view as? ConfigurationMenuItemView else {
+            guard let row = menuItem.view as? MenuDetailItemView else {
                 continue
             }
             row.setMenuHighlighted(menuItem === item)
@@ -410,43 +526,198 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         destination: String,
         isSelectedForPlay: Bool
     ) -> NSView {
-        ConfigurationMenuItemView(
-            scheme: scheme,
-            destination: destination,
-            isSelectedForPlay: isSelectedForPlay
+        MenuDetailItemView(
+            title: scheme,
+            detail: destination,
+            selection: isSelectedForPlay
         )
     }
 
-    private func makeProjectsHeaderItem() -> NSMenuItem {
-        let item = NSMenuItem(title: "Projects", action: nil, keyEquivalent: "")
-        item.isEnabled = onEditProjects != nil
+    private func makePlayItem() -> NSMenuItem {
+        let item = NSMenuItem(title: "Run Project", action: #selector(playFromMenu), keyEquivalent: "")
+        item.target = self
+        let row = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 54))
+        row.autoresizingMask = [.width]
+        let button = NSButton(title: "Run Project", target: self, action: #selector(playFromMenu))
+        button.bezelStyle = .rounded
+        button.controlSize = .large
+        button.font = .systemFont(ofSize: 16, weight: .semibold)
+        button.bezelColor = .controlAccentColor
+        button.image = menuBarImage(description: "XPlay")
+        button.imagePosition = .imageLeading
+        button.translatesAutoresizingMaskIntoConstraints = false
+        row.addSubview(button)
+        NSLayoutConstraint.activate([
+            button.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 12),
+            button.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
+            button.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            button.heightAnchor.constraint(equalToConstant: 38),
+        ])
+        item.view = row
+        playMenuItem = item
+        playMenuButton = button
+        updatePlayButton()
+        return item
+    }
+
+    private func updatePlayButton() {
+        let canStart = !isRunning && projectCatalog?.selectedProject?
+            .selectedLaunchConfiguration?.isSelectedDestinationAvailable == true
+        playMenuItem?.isEnabled = canStart
+        playMenuButton?.isEnabled = canStart
+        playMenuButton?.title = isRunning ? "Starting…" : "Run Project"
+        playMenuButton?.toolTip = projectCatalog?.selectedProject?.selectedLaunchConfiguration.map {
+            "Build and launch \($0.scheme)"
+        } ?? "Select a scheme and destination to play"
+    }
+
+    private func makeChoiceItem(title: String, labels: [String], selectedIndex: Int, action: Selector) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        let submenu = NSMenu(title: title)
+        submenu.autoenablesItems = false
+        for (index, label) in labels.enumerated() {
+            let choice = NSMenuItem(title: label, action: action, keyEquivalent: "")
+            choice.target = self
+            choice.tag = index
+            choice.state = index == selectedIndex ? .on : .off
+            choice.isEnabled = true
+            submenu.addItem(choice)
+        }
+        item.submenu = submenu
+        item.view = MenuDetailItemView(title: title, detail: labels[selectedIndex])
+        item.setAccessibilityLabel("\(title), \(labels[selectedIndex])")
+        item.isEnabled = true
+        if title == "Left Click" || title == "Right Click" {
+            item.toolTip = "One click runs the project; the other opens the menu. Changing either action swaps both."
+        }
+        return item
+    }
+
+    @objc private func playFromMenu() {
+        contextMenu.cancelTracking()
+        startProject()
+    }
+
+    @objc private func setMenuBarContent(_ item: NSMenuItem) {
+        guard AppSettings.MenuBarContent.allCases.indices.contains(item.tag) else { return }
+        appSettings.setMenuBarContent(AppSettings.MenuBarContent.allCases[item.tag])
+        finishSettingsChange()
+    }
+
+    @objc private func setLeftClickAction(_ item: NSMenuItem) {
+        appSettings.setLeftClickAction(item.tag == 0 ? .play : .menu)
+        finishSettingsChange()
+    }
+
+    @objc private func setRightClickAction(_ item: NSMenuItem) {
+        appSettings.setRightClickAction(item.tag == 0 ? .play : .menu)
+        finishSettingsChange()
+    }
+
+    private func finishSettingsChange() {
+        contextMenu = makeContextMenu()
+        refreshConfiguration()
+    }
+
+    private func makeQuitItem() -> NSMenuItem {
+        let item = NSMenuItem(
+            title: "Quit",
+            action: #selector(quitApplication),
+            keyEquivalent: "q"
+        )
+        item.target = self
+        item.isEnabled = true
+        item.view = MenuDetailItemView(
+            title: "Quit",
+            detail: "⌘Q",
+            showsChevron: false
+        )
+        item.setAccessibilityLabel("Quit, Command Q")
+        return item
+    }
+
+    private func makeAboutItem() -> NSMenuItem {
+        let displayedVersion = appVersion ?? "Development"
+        let releasesURL: URL
+        if let appVersion {
+            releasesURL = URL(
+                string: "https://github.com/mobilepur/xplay/releases/tag/v\(appVersion)"
+            )!
+        } else {
+            releasesURL = URL(string: "https://github.com/mobilepur/xplay/releases")!
+        }
+        return makeExternalLinkItem(
+            title: "XPlay",
+            detail: displayedVersion,
+            url: releasesURL,
+            toolTip: appVersion.map { "View GitHub release notes for version \($0)" }
+                ?? "View GitHub releases"
+        )
+    }
+
+    private func makeExternalLinkItem(
+        title: String,
+        detail: String = "",
+        url: URL,
+        toolTip: String? = nil
+    ) -> NSMenuItem {
+        let item = NSMenuItem(
+            title: title,
+            action: #selector(openExternalLink(_:)),
+            keyEquivalent: ""
+        )
+        item.target = self
+        item.representedObject = url
+        item.isEnabled = true
+        item.toolTip = toolTip
+        item.view = MenuDetailItemView(
+            title: title,
+            detail: detail,
+            chevronIdentifier: "navigation-chevron"
+        )
+        item.setAccessibilityLabel(
+            detail.isEmpty ? title : "\(title), \(detail)"
+        )
+        return item
+    }
+
+    private func makeSectionHeaderItem(title: String, showsEditButton: Bool = false) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = showsEditButton && onEditProjects != nil
 
         let headerView = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 28))
         headerView.autoresizingMask = [.width]
 
-        let titleLabel = NSTextField(labelWithString: "Projects")
+        let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
         titleLabel.textColor = .secondaryLabelColor
+        titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
-
-        let editButton = NSButton(title: "Edit", target: nil, action: nil)
-        editButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        editButton.isBordered = false
-        editButton.target = self
-        editButton.action = #selector(editProjects)
-        editButton.isEnabled = onEditProjects != nil
-        editButton.translatesAutoresizingMaskIntoConstraints = false
-
         headerView.addSubview(titleLabel)
-        headerView.addSubview(editButton)
 
         NSLayoutConstraint.activate([
             titleLabel.leadingAnchor.constraint(equalTo: headerView.leadingAnchor, constant: 12),
             titleLabel.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
-            editButton.trailingAnchor.constraint(equalTo: headerView.trailingAnchor, constant: -8),
-            editButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: editButton.leadingAnchor, constant: -8),
         ])
+
+        if showsEditButton {
+            let editButton = NSButton(title: "Edit", target: self, action: #selector(editProjects))
+            editButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+            editButton.isBordered = false
+            editButton.isEnabled = onEditProjects != nil
+            editButton.translatesAutoresizingMaskIntoConstraints = false
+            headerView.addSubview(editButton)
+
+            NSLayoutConstraint.activate([
+                editButton.trailingAnchor.constraint(equalTo: headerView.trailingAnchor, constant: -8),
+                editButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
+                titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: editButton.leadingAnchor, constant: -8),
+            ])
+        } else {
+            titleLabel.trailingAnchor.constraint(
+                lessThanOrEqualTo: headerView.trailingAnchor, constant: -12
+            ).isActive = true
+        }
 
         item.view = headerView
         return item
@@ -500,7 +771,13 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         makeLauncher: @escaping (XcodeProjectLaunchPlan) -> any ProjectLaunching = {
             XcodeProjectLauncher(plan: $0)
         },
-        presentLaunchFailures: (([LaunchFailure]) -> Void)? = nil
+        presentLaunchFailures: (([LaunchFailure]) -> Void)? = nil,
+        appVersion: String? = Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleShortVersionString"
+        ) as? String,
+        openExternalURL: @escaping (URL) -> Void = { url in
+            NSWorkspace.shared.open(url)
+        }
     ) {
         self.projectCatalog = projectCatalog
         self.appSettings = appSettings ?? AppSettings()
@@ -510,8 +787,10 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         self.cacheDirectory = cacheDirectory
         self.makeLauncher = makeLauncher
         self.presentLaunchFailures = presentLaunchFailures ?? Self.presentDefaultLaunchFailures
+        self.appVersion = appVersion
+        self.openExternalURL = openExternalURL
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        runningStatusView = RunningStatusView()
+        statusItemView = StatusItemView()
 
         super.init()
 
@@ -523,12 +802,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         button.action = #selector(handleStatusItemClick)
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
 
-        runningStatusView.iconImageView.image = menuBarImage(description: "Project is starting")
-        button.addSubview(runningStatusView)
+        button.addSubview(statusItemView)
 
         NSLayoutConstraint.activate([
-            runningStatusView.centerXAnchor.constraint(equalTo: button.centerXAnchor),
-            runningStatusView.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+            statusItemView.centerXAnchor.constraint(equalTo: button.centerXAnchor),
+            statusItemView.centerYAnchor.constraint(equalTo: button.centerYAnchor),
         ])
 
         refreshConfiguration()
@@ -567,12 +845,16 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         }
     }
 
-    static func interaction(for eventType: NSEvent.EventType) -> Interaction? {
+    static func interaction(
+        for eventType: NSEvent.EventType,
+        leftClickAction: AppSettings.ClickAction = .play,
+        rightClickAction: AppSettings.ClickAction = .menu
+    ) -> Interaction? {
         switch eventType {
         case .leftMouseUp:
-            return .startProject
+            return leftClickAction == .play ? .startProject : .showContextMenu
         case .rightMouseUp:
-            return .showContextMenu
+            return rightClickAction == .play ? .startProject : .showContextMenu
         default:
             return nil
         }
@@ -582,7 +864,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private func handleStatusItemClick() {
         guard
             let eventType = NSApp.currentEvent?.type,
-            let interaction = Self.interaction(for: eventType)
+            let interaction = Self.interaction(
+                for: eventType,
+                leftClickAction: appSettings.leftClickAction,
+                rightClickAction: appSettings.rightClickAction
+            )
         else {
             return
         }
@@ -614,6 +900,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             return
         }
 
+        activeLaunchPlan = plan
         setRunning(true)
         launchNext(in: [plan], at: 0, failures: [])
     }
@@ -625,6 +912,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     ) {
         guard plans.indices.contains(index) else {
             activeLauncher = nil
+            activeLaunchPlan = nil
             setRunning(false)
             if !failures.isEmpty {
                 presentLaunchFailures(failures)
@@ -659,6 +947,18 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         statusItem.menu = contextMenu
         statusItem.button?.performClick(nil)
         statusItem.menu = nil
+    }
+
+    @objc
+    private func openExternalLink(_ item: NSMenuItem) {
+        guard let url = item.representedObject as? URL else { return }
+        contextMenu.cancelTracking()
+        openExternalURL(url)
+    }
+
+    @objc
+    private func quitApplication() {
+        NSApp.terminate(nil)
     }
 
     @objc
@@ -742,23 +1042,13 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     private func setRunning(_ running: Bool) {
-        guard let button = statusItem.button else {
-            return
-        }
-
         isRunning = running
-        button.setAccessibilityLabel(running ? "Project is starting" : "Start project")
-        button.toolTip = running ? "Building and launching project…" : "Start project"
-
         if running {
-            button.image = nil
-            statusItem.length = 48
-            runningStatusView.startAnimating()
+            statusItemView.startAnimating()
         } else {
-            runningStatusView.stopAnimating()
-            statusItem.length = NSStatusItem.squareLength
-            refreshConfiguration()
+            statusItemView.stopAnimating()
         }
+        refreshConfiguration()
     }
 
     private func setRunningProgress(
@@ -770,7 +1060,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             return
         }
         if total == 1 {
-            button.setAccessibilityLabel("Starting \(plan.scheme)")
+            button.setAccessibilityLabel(appSettings.leftClickAction == .menu ? "Open XPlay menu" : "Starting \(plan.scheme)")
             button.toolTip = "Building and launching \(plan.scheme)…"
         } else {
             let position = "\(index + 1) of \(total)"
@@ -780,26 +1070,43 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     func refreshConfiguration() {
-        guard !isRunning, let button = statusItem.button else {
-            return
-        }
-
-        let configuration = projectCatalog?.selectedProject?.selectedLaunchConfiguration
-        let hasSelectedScheme = configuration != nil
+        guard let button = statusItem.button else { return }
+        let project = projectCatalog?.selectedProject
+        let configuration = project?.selectedLaunchConfiguration
+        let destination = activeLaunchPlan?.destination ?? configuration?.selectedDestination
         let canStart = configuration?.isSelectedDestinationAvailable == true
         let description: String
-        if canStart {
+        if let plan = activeLaunchPlan {
+            description = "Building and launching \(plan.scheme)…"
+        } else if canStart {
             description = "Start project"
-        } else if hasSelectedScheme {
+        } else if configuration != nil {
             description = "Choose a destination for the selected scheme"
         } else {
             description = "No project scheme selected"
         }
-        button.image = menuBarImage(description: description)
-        button.setAccessibilityLabel(canStart ? "Start project" : "\(description). Right-click for menu")
-        button.toolTip = canStart
-            ? "Start project"
-            : "\(description) · Right-click for menu"
+        button.image = nil
+        statusItemView.iconImageView.image = menuBarImage(description: "XPlay")
+        statusItemView.configure(
+            content: appSettings.menuBarContent,
+            projectName: activeLaunchPlan?.productName ?? project?.name,
+            destination: destination
+        )
+        statusItem.length = statusItemView.showsOnlyLogo
+            ? NSStatusItem.squareLength
+            : max(NSStatusBar.system.thickness, statusItemView.fittingSize.width + 8)
+        let menuHint = appSettings.leftClickAction == .menu ? "Left-click for menu" : "Right-click for menu"
+        if appSettings.leftClickAction == .menu {
+            button.setAccessibilityLabel("Open XPlay menu")
+        } else if let plan = activeLaunchPlan {
+            button.setAccessibilityLabel("Starting \(plan.scheme)")
+        } else {
+            button.setAccessibilityLabel(canStart ? "Start project" : "\(description). \(menuHint)")
+        }
+        button.setAccessibilityHelp([destination?.displayName, menuHint].compactMap { $0 }.joined(separator: ". "))
+        button.toolTip = canStart && appSettings.leftClickAction == .play
+            ? description : "\(description) · \(menuHint)"
+        updatePlayButton()
     }
 
     private func menuBarImage(description: String) -> NSImage? {

@@ -22,8 +22,8 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     private enum Layout {
-        static let windowSize = NSSize(width: 620, height: 500)
-        static let minimumWindowSize = NSSize(width: 520, height: 400)
+        static let windowSize = NSSize(width: 760, height: 500)
+        static let minimumWindowSize = NSSize(width: 620, height: 400)
         static let contentInset: CGFloat = 20
         static let projectIconSize: CGFloat = 32
         static let projectRowHeight: CGFloat = 52
@@ -37,6 +37,8 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
         static let projectCell = NSUserInterfaceItemIdentifier("ProjectCell")
         static let projectPath = NSUserInterfaceItemIdentifier("ProjectPath")
         static let removeProject = NSUserInterfaceItemIdentifier("RemoveProject")
+        static let workspaceDrilldown = NSUserInterfaceItemIdentifier("WorkspaceDrilldown")
+        static let workspaceDetailTitle = NSUserInterfaceItemIdentifier("WorkspaceDetailTitle")
         static let schemeCell = NSUserInterfaceItemIdentifier("SchemeCell")
         static let schemeToggle = NSUserInterfaceItemIdentifier("SchemeToggle")
         static let destinationSelector = NSUserInterfaceItemIdentifier("DestinationSelector")
@@ -85,6 +87,14 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
         button.bezelStyle = .rounded
         button.setAccessibilityLabel("Add workspace")
         return button
+    }()
+
+    private(set) lazy var workspaceDetailTitleLabel: NSTextField = {
+        let label = NSTextField(labelWithString: "Select a Workspace")
+        label.identifier = Identifier.workspaceDetailTitle
+        label.font = .systemFont(ofSize: 17, weight: .semibold)
+        label.lineBreakMode = .byTruncatingTail
+        return label
     }()
 
     private(set) lazy var schemeStatusLabel: NSTextField = {
@@ -141,67 +151,72 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
         panel.contentView = contentView
 
         let projectsLabel = sectionLabel("Projects")
-        let schemesLabel = sectionLabel("Schemes")
+        let configurationsLabel = sectionLabel("Launch Configurations")
+        configurationsLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+        configurationsLabel.textColor = .secondaryLabelColor
         let projectScrollView = scrollView(for: projectTableView)
         let schemeScrollView = scrollView(for: schemeTableView)
+        let splitView = NSSplitView()
+        splitView.isVertical = true
+        splitView.dividerStyle = .thin
+        splitView.translatesAutoresizingMaskIntoConstraints = false
 
+        let sidebar = NSView()
+        let detail = NSView()
+        splitView.addArrangedSubview(sidebar)
+        splitView.addArrangedSubview(detail)
+        contentView.addSubview(splitView)
+
+        for view in [projectsLabel, projectScrollView, addButton] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            sidebar.addSubview(view)
+        }
         for view in [
-            projectsLabel,
-            projectScrollView,
-            schemesLabel,
+            workspaceDetailTitleLabel,
+            configurationsLabel,
             schemeStatusLabel,
             schemeScrollView,
-            addButton,
             doneButton,
         ] {
             view.translatesAutoresizingMaskIntoConstraints = false
-            contentView.addSubview(view)
+            detail.addSubview(view)
         }
 
+        let sidebarWidth = sidebar.widthAnchor.constraint(equalToConstant: 280)
+        sidebarWidth.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            projectsLabel.topAnchor.constraint(
-                equalTo: contentView.topAnchor,
-                constant: Layout.contentInset
-            ),
-            projectsLabel.leadingAnchor.constraint(
-                equalTo: contentView.leadingAnchor,
-                constant: Layout.contentInset
-            ),
+            splitView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            splitView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            splitView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            splitView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            sidebar.widthAnchor.constraint(greaterThanOrEqualToConstant: 220),
+            sidebarWidth,
+            detail.widthAnchor.constraint(greaterThanOrEqualToConstant: 340),
 
+            projectsLabel.topAnchor.constraint(equalTo: sidebar.topAnchor, constant: Layout.contentInset),
+            projectsLabel.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: Layout.contentInset),
+            projectsLabel.trailingAnchor.constraint(lessThanOrEqualTo: sidebar.trailingAnchor, constant: -Layout.contentInset),
             projectScrollView.topAnchor.constraint(equalTo: projectsLabel.bottomAnchor, constant: 8),
-            projectScrollView.leadingAnchor.constraint(
-                equalTo: contentView.leadingAnchor,
-                constant: Layout.contentInset
-            ),
-            projectScrollView.trailingAnchor.constraint(
-                equalTo: contentView.trailingAnchor,
-                constant: -Layout.contentInset
-            ),
-            projectScrollView.heightAnchor.constraint(equalToConstant: 124),
-
-            schemesLabel.topAnchor.constraint(equalTo: projectScrollView.bottomAnchor, constant: 18),
-            schemesLabel.leadingAnchor.constraint(equalTo: projectScrollView.leadingAnchor),
-
-            schemeStatusLabel.centerYAnchor.constraint(equalTo: schemesLabel.centerYAnchor),
-            schemeStatusLabel.leadingAnchor.constraint(
-                greaterThanOrEqualTo: schemesLabel.trailingAnchor,
-                constant: 12
-            ),
-            schemeStatusLabel.trailingAnchor.constraint(equalTo: projectScrollView.trailingAnchor),
-
-            schemeScrollView.topAnchor.constraint(equalTo: schemesLabel.bottomAnchor, constant: 8),
-            schemeScrollView.leadingAnchor.constraint(equalTo: projectScrollView.leadingAnchor),
-            schemeScrollView.trailingAnchor.constraint(equalTo: projectScrollView.trailingAnchor),
-            schemeScrollView.bottomAnchor.constraint(equalTo: addButton.topAnchor, constant: -16),
-
+            projectScrollView.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: Layout.contentInset),
+            projectScrollView.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -Layout.contentInset),
+            projectScrollView.bottomAnchor.constraint(equalTo: addButton.topAnchor, constant: -16),
             addButton.leadingAnchor.constraint(equalTo: projectScrollView.leadingAnchor),
-            addButton.bottomAnchor.constraint(
-                equalTo: contentView.bottomAnchor,
-                constant: -Layout.contentInset
-            ),
+            addButton.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor, constant: -Layout.contentInset),
 
-            doneButton.trailingAnchor.constraint(equalTo: projectScrollView.trailingAnchor),
-            doneButton.bottomAnchor.constraint(equalTo: addButton.bottomAnchor),
+            workspaceDetailTitleLabel.topAnchor.constraint(equalTo: detail.topAnchor, constant: Layout.contentInset),
+            workspaceDetailTitleLabel.leadingAnchor.constraint(equalTo: detail.leadingAnchor, constant: Layout.contentInset),
+            workspaceDetailTitleLabel.trailingAnchor.constraint(equalTo: detail.trailingAnchor, constant: -Layout.contentInset),
+            configurationsLabel.topAnchor.constraint(equalTo: workspaceDetailTitleLabel.bottomAnchor, constant: 12),
+            configurationsLabel.leadingAnchor.constraint(equalTo: workspaceDetailTitleLabel.leadingAnchor),
+            schemeStatusLabel.centerYAnchor.constraint(equalTo: configurationsLabel.centerYAnchor),
+            schemeStatusLabel.leadingAnchor.constraint(greaterThanOrEqualTo: configurationsLabel.trailingAnchor, constant: 12),
+            schemeStatusLabel.trailingAnchor.constraint(equalTo: workspaceDetailTitleLabel.trailingAnchor),
+            schemeScrollView.topAnchor.constraint(equalTo: configurationsLabel.bottomAnchor, constant: 8),
+            schemeScrollView.leadingAnchor.constraint(equalTo: workspaceDetailTitleLabel.leadingAnchor),
+            schemeScrollView.trailingAnchor.constraint(equalTo: workspaceDetailTitleLabel.trailingAnchor),
+            schemeScrollView.bottomAnchor.constraint(equalTo: doneButton.topAnchor, constant: -16),
+            doneButton.trailingAnchor.constraint(equalTo: schemeScrollView.trailingAnchor),
+            doneButton.bottomAnchor.constraint(equalTo: detail.bottomAnchor, constant: -Layout.contentInset),
         ])
 
         window = panel
@@ -332,6 +347,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
         }
 
         catalog.selectProject(at: tableView.selectedRow)
+        updateWorkspaceDetailTitle()
         schemeTableView.reloadData()
         updateSchemeStatus()
         onCatalogChange?()
@@ -556,6 +572,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     private func reloadTables() {
+        updateWorkspaceDetailTitle()
         projectTableView.reloadData()
         if
             let selectedURL = catalog.selectedProject?.url,
@@ -567,6 +584,14 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
         }
         schemeTableView.reloadData()
         updateSchemeStatus()
+    }
+
+    private func updateWorkspaceDetailTitle() {
+        workspaceDetailTitleLabel.stringValue = catalog.selectedProject?.name ?? "Select a Workspace"
+        workspaceDetailTitleLabel.setAccessibilityLabel(
+            catalog.selectedProject.map { "Launch configurations for \($0.name)" }
+                ?? "Select a workspace"
+        )
     }
 
     private func updateSchemeStatus() {
@@ -640,6 +665,12 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
         pathLabel.lineBreakMode = .byTruncatingMiddle
         pathLabel.translatesAutoresizingMaskIntoConstraints = false
 
+        let drilldown = NSImageView()
+        drilldown.identifier = Identifier.workspaceDrilldown
+        drilldown.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)
+        drilldown.contentTintColor = .secondaryLabelColor
+        drilldown.translatesAutoresizingMaskIntoConstraints = false
+
         let removeButton = NSButton(
             image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "Remove project")
                 ?? NSImage(),
@@ -655,6 +686,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
         cell.addSubview(imageView)
         cell.addSubview(nameLabel)
         cell.addSubview(pathLabel)
+        cell.addSubview(drilldown)
         cell.addSubview(removeButton)
         cell.imageView = imageView
         cell.textField = nameLabel
@@ -668,16 +700,21 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
             nameLabel.topAnchor.constraint(equalTo: cell.topAnchor, constant: 6),
             nameLabel.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 10),
             nameLabel.trailingAnchor.constraint(
-                lessThanOrEqualTo: removeButton.leadingAnchor,
-                constant: -10
+                lessThanOrEqualTo: drilldown.leadingAnchor,
+                constant: -8
             ),
 
             pathLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 2),
             pathLabel.leadingAnchor.constraint(equalTo: nameLabel.leadingAnchor),
             pathLabel.trailingAnchor.constraint(
-                lessThanOrEqualTo: removeButton.leadingAnchor,
-                constant: -10
+                lessThanOrEqualTo: drilldown.leadingAnchor,
+                constant: -8
             ),
+
+            drilldown.trailingAnchor.constraint(equalTo: removeButton.leadingAnchor, constant: -6),
+            drilldown.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            drilldown.widthAnchor.constraint(equalToConstant: 8),
+            drilldown.heightAnchor.constraint(equalToConstant: 12),
 
             removeButton.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6),
             removeButton.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
@@ -702,6 +739,8 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
 
         cell.addSubview(checkbox)
         cell.addSubview(selector)
+        let preferredSelectorWidth = selector.widthAnchor.constraint(equalToConstant: 220)
+        preferredSelectorWidth.priority = .defaultHigh
         NSLayoutConstraint.activate([
             checkbox.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
             checkbox.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
@@ -709,7 +748,8 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
 
             selector.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
             selector.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            selector.widthAnchor.constraint(equalToConstant: 220),
+            selector.widthAnchor.constraint(greaterThanOrEqualToConstant: 140),
+            preferredSelectorWidth,
         ])
         return cell
     }

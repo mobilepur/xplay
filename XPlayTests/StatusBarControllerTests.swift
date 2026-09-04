@@ -13,6 +13,209 @@ final class StatusBarControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testMenuBarChoicesUpdateVisibleContentAndKeepXPlayFallback() throws {
+        try withState { catalog, settings in
+            let phone = XcodeDestination(platform: .iOSSimulator, id: "phone", name: "iPhone 17 Pro")
+            configure(catalog, schemes: ["Example-iOS"], destinations: [[phone]])
+            let controller = StatusBarController(projectCatalog: catalog, appSettings: settings)
+            let button = try XCTUnwrap(controller.statusItem.button)
+            let views = descendants(of: button)
+            let logo = try XCTUnwrap(views.first { $0.identifier?.rawValue == "xplay-status-icon" })
+            let device = try XCTUnwrap(views.first { $0.identifier?.rawValue == "destination-status-icon" })
+            let name = try XCTUnwrap(views.compactMap { $0 as? NSTextField }.first {
+                $0.identifier?.rawValue == "status-project-name"
+            })
+            XCTAssertFalse(logo.isHiddenOrHasHiddenAncestor)
+            XCTAssertTrue(device.isHiddenOrHasHiddenAncestor)
+            XCTAssertTrue(name.isHiddenOrHasHiddenAncestor)
+
+            for (index, mode) in AppSettings.MenuBarContent.allCases.enumerated() {
+                let submenu = try XCTUnwrap(controller.contextMenu.items.first {
+                    $0.title == "Menu Bar Icon"
+                }?.submenu)
+                XCTAssertEqual(submenu.items.map(\.title), ["XPlay", "Name + Target", "Name", "Target"])
+                submenu.performActionForItem(at: index)
+                XCTAssertEqual(settings.menuBarContent, mode)
+                XCTAssertEqual(logo.isHiddenOrHasHiddenAncestor, mode != .xplay)
+                XCTAssertEqual(device.isHiddenOrHasHiddenAncestor, mode == .xplay || mode == .name)
+                XCTAssertEqual(name.isHiddenOrHasHiddenAncestor, mode == .xplay || mode == .target)
+                XCTAssertEqual(name.stringValue, "Example")
+                let updated = try XCTUnwrap(controller.contextMenu.items.first {
+                    $0.title == "Menu Bar Icon"
+                }?.submenu)
+                XCTAssertEqual(updated.items[index].state, .on)
+            }
+
+            catalog.setSchemeEnabled(false, scheme: "Example-iOS", forProjectAt: 0)
+            controller.refreshConfiguration()
+            XCTAssertFalse(logo.isHiddenOrHasHiddenAncestor)
+            XCTAssertTrue(device.isHiddenOrHasHiddenAncestor)
+        }
+    }
+
+    @MainActor
+    func testClickSettingsUpdateRoutingAndMenuAccessHint() throws {
+        try withState { catalog, settings in
+            let controller = StatusBarController(projectCatalog: catalog, appSettings: settings)
+            let right = try XCTUnwrap(controller.contextMenu.items.first { $0.title == "Right Click" }?.submenu)
+            XCTAssertEqual(right.items.map(\.title), ["Play", "Menu"])
+            right.performActionForItem(at: 0)
+            XCTAssertEqual(settings.rightClickAction, .play)
+            XCTAssertEqual(settings.leftClickAction, .menu)
+            XCTAssertEqual(controller.statusItem.button?.accessibilityLabel(), "Open XPlay menu")
+            XCTAssertTrue(controller.statusItem.button?.toolTip?.contains("Left-click for menu") == true)
+            let left = try XCTUnwrap(controller.contextMenu.items.first { $0.title == "Left Click" }?.submenu)
+            XCTAssertEqual(left.items[1].state, .on)
+            XCTAssertEqual(StatusBarController.interaction(for: .leftMouseUp,
+                leftClickAction: settings.leftClickAction, rightClickAction: settings.rightClickAction), .showContextMenu)
+            XCTAssertEqual(StatusBarController.interaction(for: .rightMouseUp,
+                leftClickAction: settings.leftClickAction, rightClickAction: settings.rightClickAction), .startProject)
+            let refreshedRight = try XCTUnwrap(controller.contextMenu.items.first { $0.title == "Right Click" }?.submenu)
+            refreshedRight.performActionForItem(at: 1)
+            XCTAssertEqual(settings.leftClickAction, .play)
+            XCTAssertEqual(settings.rightClickAction, .menu)
+            XCTAssertNil(StatusBarController.interaction(for: .mouseMoved))
+        }
+    }
+
+    @MainActor
+    func testSettingsRowsShowCurrentValuesBeforeChevronAndUpdateTogether() throws {
+        try withState { catalog, settings in
+            let controller = StatusBarController(projectCatalog: catalog, appSettings: settings)
+            @MainActor func verifyRow(_ title: String, value: String) throws {
+                let menu = controller.contextMenu
+                let item = try XCTUnwrap(menu.items.first { $0.title == title })
+                let row = try XCTUnwrap(item.view)
+                row.frame.size.width = 320
+                row.layoutSubtreeIfNeeded()
+                let labels = row.subviews.compactMap { $0 as? NSTextField }
+                let titleLabel = try XCTUnwrap(labels.first { $0.stringValue == title })
+                let valueLabel = try XCTUnwrap(labels.first { $0.stringValue == value })
+                let chevron = try XCTUnwrap(row.subviews.first { $0.identifier?.rawValue == "setting-chevron" })
+                XCTAssertEqual(valueLabel.textColor, .secondaryLabelColor)
+                XCTAssertEqual(valueLabel.alignment, .right)
+                for width: CGFloat in [320, 336, 500] {
+                    row.frame.size.width = width
+                    row.layoutSubtreeIfNeeded()
+                    XCTAssertGreaterThanOrEqual(valueLabel.frame.width, ceil(try XCTUnwrap(valueLabel.cell).cellSize.width))
+                }
+                XCTAssertGreaterThanOrEqual(valueLabel.frame.minX, titleLabel.frame.maxX + 8)
+                XCTAssertLessThan(valueLabel.frame.maxX, chevron.frame.minX)
+                XCTAssertFalse(chevron.isHidden)
+                XCTAssertEqual(item.submenu?.items.first { $0.state == .on }?.title, value)
+                menu.delegate?.menu?(menu, willHighlight: item)
+                XCTAssertEqual(valueLabel.textColor, .selectedMenuItemTextColor)
+                menu.delegate?.menu?(menu, willHighlight: nil)
+                XCTAssertEqual(valueLabel.textColor, .secondaryLabelColor)
+            }
+            try verifyRow("Menu Bar Icon", value: "XPlay")
+            try verifyRow("Left Click", value: "Play")
+            try verifyRow("Right Click", value: "Menu")
+            let displayChoices = try XCTUnwrap(controller.contextMenu.items.first { $0.title == "Menu Bar Icon" }?.submenu)
+            displayChoices.performActionForItem(at: 1)
+            try verifyRow("Menu Bar Icon", value: "Name + Target")
+            let leftChoices = try XCTUnwrap(controller.contextMenu.items.first { $0.title == "Left Click" }?.submenu)
+            leftChoices.performActionForItem(at: 1)
+            try verifyRow("Left Click", value: "Menu")
+            try verifyRow("Right Click", value: "Play")
+            let rightChoices = try XCTUnwrap(controller.contextMenu.items.first { $0.title == "Right Click" }?.submenu)
+            rightChoices.performActionForItem(at: 1)
+            try verifyRow("Left Click", value: "Play")
+            try verifyRow("Right Click", value: "Menu")
+        }
+    }
+
+    @MainActor
+    func testLargePlayButtonLaunchesSelectionAndDisablesDuringLaunch() throws {
+        try withState { catalog, settings in
+            var plans: [XcodeProjectLaunchPlan] = []
+            let controller = StatusBarController(projectCatalog: catalog, appSettings: settings,
+                makeLauncher: { plan in
+                    plans.append(plan)
+                    return DeferredProjectLauncher()
+                })
+            let item = try XCTUnwrap(controller.contextMenu.items.first { $0.title == "Run Project" })
+            let row = try XCTUnwrap(item.view)
+            let play = try XCTUnwrap(row.subviews.compactMap { $0 as? NSButton }.first)
+            XCTAssertGreaterThanOrEqual(row.frame.height, 48)
+            XCTAssertEqual(play.title, "Run Project")
+            XCTAssertEqual(play.image?.name(), NSImage.Name("XPlayIcon"))
+            XCTAssertEqual(play.image?.size, NSSize(width: 21, height: 18))
+            XCTAssertTrue(play.image?.isTemplate == true)
+            XCTAssertFalse(play.isEnabled)
+            XCTAssertFalse(item.isEnabled)
+            let mac = XcodeDestination(platform: .macOS, id: "mac", name: "My Mac")
+            configure(catalog, schemes: ["Example-macOS"], destinations: [[mac]])
+            controller.refreshConfiguration()
+            XCTAssertTrue(play.isEnabled)
+            XCTAssertTrue(item.isEnabled)
+            play.performClick(nil)
+            XCTAssertEqual(plans.map(\.scheme), ["Example-macOS"])
+            XCTAssertFalse(play.isEnabled)
+            XCTAssertFalse(item.isEnabled)
+            XCTAssertEqual(play.title, "Starting…")
+            play.performClick(nil)
+            XCTAssertEqual(plans.count, 1)
+        }
+    }
+
+    @MainActor
+    func testAllDisplayModesKeepLoadingDotsVisibleAndWidthStable() throws {
+        for mode in AppSettings.MenuBarContent.allCases {
+            try withState { catalog, settings in
+                settings.setMenuBarContent(mode)
+                let mac = XcodeDestination(platform: .macOS, id: "mac", name: "My Mac")
+                configure(catalog, schemes: ["Example"], destinations: [[mac]])
+                let controller = StatusBarController(projectCatalog: catalog, appSettings: settings,
+                    makeLauncher: { _ in DeferredProjectLauncher() })
+                let length = controller.statusItem.length
+                controller.perform(.startProject)
+                let button = try XCTUnwrap(controller.statusItem.button)
+                button.layoutSubtreeIfNeeded()
+                let views = descendants(of: button)
+                let dots = try XCTUnwrap(views.first { $0.identifier?.rawValue == "running-dots" })
+                XCTAssertFalse(dots.isHiddenOrHasHiddenAncestor, mode.rawValue)
+                XCTAssertEqual(length, controller.statusItem.length, mode.rawValue)
+                XCTAssertEqual(dots.subviews.count, 3)
+                XCTAssertTrue(dots.subviews.allSatisfy { $0.layer?.animation(forKey: "pulse") != nil })
+                let dotsRect = dots.convert(dots.bounds, to: button)
+                XCTAssertGreaterThanOrEqual(dotsRect.minY, 0)
+                XCTAssertLessThanOrEqual(dotsRect.maxY, button.bounds.height)
+                if mode == .target || mode == .nameAndTarget {
+                    let device = try XCTUnwrap(views.first { $0.identifier?.rawValue == "destination-status-icon" })
+                    let content = try XCTUnwrap(views.first { $0.identifier?.rawValue == "status-content" })
+                    XCTAssertLessThan(dots.convert(dots.bounds, to: content).maxY,
+                                      device.convert(device.bounds, to: content).minY)
+                }
+            }
+        }
+    }
+
+    @MainActor
+    func testLongProjectNameStaysCompactAndDisplayCanChangeDuringLaunch() throws {
+        try withState { catalog, settings in
+            settings.setMenuBarContent(.nameAndTarget)
+            let name = String(repeating: "LongProject", count: 12)
+            catalog.add(URL(fileURLWithPath: "/Projects/\(name).xcworkspace"), schemes: ["Example"])
+            catalog.setSchemeEnabled(true, scheme: "Example", forProjectAt: 0)
+            catalog.updateDestinations([XcodeDestination(platform: .macOS, id: "mac", name: "My Mac")],
+                scheme: "Example", forProjectAt: 0)
+            let controller = StatusBarController(projectCatalog: catalog, appSettings: settings,
+                makeLauncher: { _ in DeferredProjectLauncher() })
+            let button = try XCTUnwrap(controller.statusItem.button)
+            button.layoutSubtreeIfNeeded()
+            XCTAssertLessThanOrEqual(controller.statusItem.length, 192)
+            controller.perform(.startProject)
+            let submenu = try XCTUnwrap(controller.contextMenu.items.first { $0.title == "Menu Bar Icon" }?.submenu)
+            submenu.performActionForItem(at: 0)
+            let views = descendants(of: button)
+            XCTAssertFalse(try XCTUnwrap(views.first { $0.identifier?.rawValue == "xplay-status-icon" }).isHiddenOrHasHiddenAncestor)
+            XCTAssertFalse(try XCTUnwrap(views.first { $0.identifier?.rawValue == "running-dots" }).isHiddenOrHasHiddenAncestor)
+            XCTAssertEqual(controller.statusItem.length, NSStatusItem.squareLength)
+        }
+    }
+
+    @MainActor
     func testContextMenuShowsProjectsSettingsAndQuitSections() throws {
         var didRequestProjectEditor = false
         let controller = StatusBarController(
@@ -24,10 +227,13 @@ final class StatusBarControllerTests: XCTestCase {
             items.map(\.title),
             [
                 "No project selected",
+                "Run Project",
                 "",
                 "Projects", "No projects yet",
                 "",
-                "Settings", "Accept Macros",
+                "Settings", "Menu Bar Icon", "Left Click", "Right Click", "Accept Macros",
+                "",
+                "About", "XPlay", "Report a Problem…",
                 "",
                 "Quit",
             ]
@@ -39,7 +245,71 @@ final class StatusBarControllerTests: XCTestCase {
         XCTAssertEqual(editButton.title, "Edit")
         editButton.performClick(nil)
         XCTAssertTrue(didRequestProjectEditor)
-        XCTAssertEqual(items.first { $0.title == "Quit" }?.keyEquivalent, "q")
+        let quit = try XCTUnwrap(items.first { $0.title == "Quit" })
+        XCTAssertEqual(quit.keyEquivalent, "q")
+        XCTAssertNotEqual(quit.action, #selector(NSApplication.terminate(_:)))
+        XCTAssertNil(quit.image)
+        let quitRow = try XCTUnwrap(quit.view)
+        XCTAssertTrue(quitRow.subviews.compactMap { $0 as? NSImageView }.allSatisfy(\.isHidden))
+        XCTAssertTrue(quitRow.subviews.compactMap { $0 as? NSTextField }.contains {
+            $0.stringValue == "⌘Q" && $0.textColor == .secondaryLabelColor
+        })
+    }
+
+    @MainActor
+    func testAboutSectionShowsVersionAndOpensReleaseNotesAndIssueReporter() throws {
+        var openedURLs: [URL] = []
+        let controller = StatusBarController(
+            appVersion: "1.2.3",
+            openExternalURL: { openedURLs.append($0) }
+        )
+        let menu = controller.contextMenu
+        let aboutHeader = try XCTUnwrap(menu.items.first { $0.title == "About" }?.view)
+        XCTAssertTrue(aboutHeader.subviews.compactMap { $0 as? NSTextField }.contains {
+            $0.stringValue == "About"
+        })
+        let versionItem = try XCTUnwrap(menu.items.first { $0.title == "XPlay" })
+        let versionRow = try XCTUnwrap(versionItem.view)
+        XCTAssertTrue(versionRow.subviews.compactMap { $0 as? NSTextField }.contains {
+            $0.stringValue == "1.2.3" && $0.textColor == .secondaryLabelColor
+        })
+        XCTAssertNotNil(versionRow.subviews.first {
+            $0.identifier?.rawValue == "navigation-chevron"
+        })
+        let reportItem = try XCTUnwrap(menu.items.first { $0.title == "Report a Problem…" })
+        let reportRow = try XCTUnwrap(reportItem.view)
+        XCTAssertNotNil(reportRow.subviews.first {
+            $0.identifier?.rawValue == "navigation-chevron"
+        })
+
+        menu.performActionForItem(at: menu.index(of: versionItem))
+        menu.performActionForItem(at: menu.index(of: reportItem))
+
+        XCTAssertEqual(openedURLs.map(\.absoluteString), [
+            "https://github.com/mobilepur/xplay/releases/tag/v1.2.3",
+            "https://github.com/mobilepur/xplay/issues/new",
+        ])
+    }
+
+    @MainActor
+    func testDevelopmentAboutRowOpensGeneralReleasesPage() throws {
+        var openedURLs: [URL] = []
+        let controller = StatusBarController(
+            appVersion: nil,
+            openExternalURL: { openedURLs.append($0) }
+        )
+        let versionItem = try XCTUnwrap(controller.contextMenu.items.first { $0.title == "XPlay" })
+        let versionRow = try XCTUnwrap(versionItem.view)
+        XCTAssertTrue(versionRow.subviews.compactMap { $0 as? NSTextField }.contains {
+            $0.stringValue == "Development"
+        })
+
+        controller.contextMenu.performActionForItem(
+            at: controller.contextMenu.index(of: versionItem)
+        )
+
+        XCTAssertEqual(openedURLs.first?.absoluteString,
+                       "https://github.com/mobilepur/xplay/releases")
     }
 
     @MainActor
@@ -492,40 +762,167 @@ final class StatusBarControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testRunningStatusShowsThreeAnimatedDotsBesideIconInsteadOfSpinner() throws {
+    func testStatusShowsSelectedDeviceAndHidesItWithoutASelection() throws {
         try withState { catalog, settings in
-            let mac = XcodeDestination(platform: .macOS, id: "mac", name: "My Mac")
-            configure(catalog, schemes: ["Example"], destinations: [[mac]])
-            let controller = StatusBarController(
-                projectCatalog: catalog,
-                appSettings: settings,
-                makeLauncher: { _ in DeferredProjectLauncher() }
-            )
-
-            controller.perform(.startProject)
-
+            let cases: [(XcodeDestination, String)] = [
+                (XcodeDestination(platform: .macOS, id: "mac", name: "My Mac"), "Mac"),
+                (XcodeDestination(platform: .iOSSimulator, id: "phone", name: "iPhone 17 Pro"), "iPhone"),
+                (XcodeDestination(platform: .iOSSimulator, id: "pad", name: "iPad Pro (M4)"), "iPad"),
+                (XcodeDestination(platform: .iOSSimulator, id: "custom", name: "QA device"), "iOS Simulator"),
+            ]
+            settings.setMenuBarContent(.target)
+            configure(catalog, schemes: ["Example"], destinations: [cases.map { $0.0 }])
+            let controller = StatusBarController(projectCatalog: catalog, appSettings: settings)
             let button = try XCTUnwrap(controller.statusItem.button)
             let views = descendants(of: button)
-            let runningIndicator = try XCTUnwrap(
-                views.first { $0.identifier?.rawValue == "running-indicator" }
-            )
-            let runningIcon = try XCTUnwrap(
-                views.compactMap { $0 as? NSImageView }.first {
-                    $0.identifier?.rawValue == "running-status-icon"
-                }
-            )
-            let dots = views.filter {
-                $0.identifier?.rawValue.hasPrefix("running-dot-") == true
+            let device = try XCTUnwrap(views.compactMap { $0 as? NSImageView }.first {
+                $0.identifier?.rawValue == "destination-status-icon"
+            })
+            let logo = try XCTUnwrap(views.compactMap { $0 as? NSImageView }.first {
+                $0.identifier?.rawValue == "xplay-status-icon"
+            })
+            let dots = try XCTUnwrap(views.first { $0.identifier?.rawValue == "running-dots" })
+
+            XCTAssertTrue(device.isHiddenOrHasHiddenAncestor)
+            XCTAssertTrue(dots.isHiddenOrHasHiddenAncestor)
+            XCTAssertEqual(controller.statusItem.length, NSStatusItem.squareLength)
+
+            for (destination, label) in cases {
+                catalog.selectDestination(id: destination.id, scheme: "Example", forProjectAt: 0)
+                controller.refreshConfiguration()
+                button.layoutSubtreeIfNeeded()
+
+                XCTAssertFalse(device.isHiddenOrHasHiddenAncestor)
+                XCTAssertEqual(device.image?.accessibilityDescription, label)
+                XCTAssertEqual(device.accessibilityLabel(), destination.displayName)
+                XCTAssertNotNil(logo.image)
+                XCTAssertTrue(logo.isHiddenOrHasHiddenAncestor)
+                XCTAssertTrue(dots.isHiddenOrHasHiddenAncestor)
             }
 
-            XCTAssertFalse(runningIndicator.isHidden)
-            XCTAssertNotNil(runningIcon.image)
-            XCTAssertEqual(dots.count, 3)
-            XCTAssertTrue(dots.allSatisfy { $0.layer?.animation(forKey: "pulse") != nil })
-            XCTAssertTrue(views.compactMap { $0 as? NSProgressIndicator }.isEmpty)
-            XCTAssertNotEqual(controller.statusItem.length, NSStatusItem.squareLength)
-            XCTAssertNil(button.image)
+            catalog.setSchemeEnabled(false, scheme: "Example", forProjectAt: 0)
+            controller.refreshConfiguration()
+            XCTAssertTrue(device.isHiddenOrHasHiddenAncestor)
+            XCTAssertEqual(controller.statusItem.length, NSStatusItem.squareLength)
         }
+    }
+
+    @MainActor
+    func testRunningStatusShowsThreeAnimatedDotsBelowSelectedDevice() throws {
+        let destinations = [
+            XcodeDestination(platform: .macOS, id: "mac", name: "My Mac"),
+            XcodeDestination(platform: .iOSSimulator, id: "phone", name: "iPhone 17 Pro"),
+            XcodeDestination(platform: .iOSSimulator, id: "pad", name: "iPad Pro"),
+            XcodeDestination(platform: .iOSSimulator, id: "custom", name: "QA device"),
+        ]
+        for destination in destinations {
+            try withState { catalog, settings in
+                settings.setMenuBarContent(.target)
+                configure(catalog, schemes: ["Example"], destinations: [[destination]])
+                let controller = StatusBarController(
+                    projectCatalog: catalog,
+                    appSettings: settings,
+                    makeLauncher: { _ in DeferredProjectLauncher() }
+                )
+
+                let idleLength = controller.statusItem.length
+                controller.perform(.startProject)
+
+                let button = try XCTUnwrap(controller.statusItem.button)
+                button.layoutSubtreeIfNeeded()
+                let views = descendants(of: button)
+                let statusContent = try XCTUnwrap(
+                    views.first { $0.identifier?.rawValue == "status-content" }
+                )
+                let runningIcon = try XCTUnwrap(
+                    views.compactMap { $0 as? NSImageView }.first {
+                        $0.identifier?.rawValue == "xplay-status-icon"
+                    }
+                )
+                let dots = views.filter {
+                    $0.identifier?.rawValue.hasPrefix("running-dot-") == true
+                }
+                let device = try XCTUnwrap(views.compactMap { $0 as? NSImageView }.first {
+                    $0.identifier?.rawValue == "destination-status-icon"
+                })
+                let deviceRect = device.convert(device.bounds, to: statusContent)
+
+                XCTAssertFalse(statusContent.isHidden)
+                XCTAssertNotNil(runningIcon.image)
+                XCTAssertEqual(dots.count, 3)
+                XCTAssertTrue(dots.allSatisfy { $0.layer?.animation(forKey: "pulse") != nil })
+                for dot in dots {
+                    XCTAssertFalse(dot.isHiddenOrHasHiddenAncestor)
+                    let dotRect = dot.convert(dot.bounds, to: statusContent)
+                    XCTAssertLessThan(dotRect.maxY, deviceRect.minY)
+                    XCTAssertGreaterThanOrEqual(dotRect.minX, deviceRect.minX)
+                    XCTAssertLessThanOrEqual(dotRect.maxX, deviceRect.maxX)
+                }
+                XCTAssertFalse(device.isHiddenOrHasHiddenAncestor)
+                XCTAssertNotNil(device.image)
+                XCTAssertTrue(views.compactMap { $0 as? NSProgressIndicator }.isEmpty)
+                XCTAssertEqual(controller.statusItem.length, idleLength)
+                XCTAssertNil(button.image)
+            }
+        }
+    }
+
+    @MainActor
+    func testFinishingLaunchHidesDotsAndRefreshesDeviceAfterSuccessAndFailure() async throws {
+        let suiteName = "StatusBarControllerTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let catalog = ProjectCatalog(defaults: defaults, storageKey: "projects")
+        let phone = XcodeDestination(platform: .iOSSimulator, id: "phone", name: "iPhone 17 Pro")
+        let pad = XcodeDestination(platform: .iOSSimulator, id: "pad", name: "iPad Pro")
+        configure(catalog, schemes: ["Example"], destinations: [[phone, pad]])
+        let launcher = DeferredProjectLauncher()
+        var failureCount = 0
+        let settings = AppSettings(defaults: defaults, storageKey: "settings")
+        settings.setMenuBarContent(.target)
+        let controller = StatusBarController(
+            projectCatalog: catalog,
+            appSettings: settings,
+            makeLauncher: { _ in launcher },
+            presentLaunchFailures: { failureCount += $0.count }
+        )
+        let button = try XCTUnwrap(controller.statusItem.button)
+        let views = descendants(of: button)
+        let device = try XCTUnwrap(views.compactMap { $0 as? NSImageView }.first {
+            $0.identifier?.rawValue == "destination-status-icon"
+        })
+        let dots = try XCTUnwrap(views.first { $0.identifier?.rawValue == "running-dots" })
+        let playRow = try XCTUnwrap(controller.contextMenu.items.first { $0.title == "Run Project" }?.view)
+        let play = try XCTUnwrap(playRow.subviews.compactMap { $0 as? NSButton }.first)
+
+        for shouldFail in [false, true] {
+            catalog.selectDestination(id: phone.id, scheme: "Example", forProjectAt: 0)
+            controller.refreshConfiguration()
+            controller.perform(.startProject)
+            XCTAssertFalse(dots.isHiddenOrHasHiddenAncestor)
+
+            catalog.selectDestination(id: pad.id, scheme: "Example", forProjectAt: 0)
+            controller.refreshConfiguration()
+            XCTAssertEqual(device.image?.accessibilityDescription, "iPhone")
+
+            launcher.complete(shouldFail ? .failure(TestLaunchError.failed) : .success(launcher.logURL))
+            let finished = expectation(
+                for: NSPredicate { _, _ in dots.isHidden },
+                evaluatedWith: nil
+            )
+            await fulfillment(of: [finished], timeout: 2)
+
+            XCTAssertEqual(device.image?.accessibilityDescription, "iPad")
+            XCTAssertTrue(play.isEnabled)
+            XCTAssertEqual(play.title, "Run Project")
+            XCTAssertTrue(views.filter {
+                $0.identifier?.rawValue.hasPrefix("running-dot-") == true
+            }.allSatisfy { $0.layer?.animation(forKey: "pulse") == nil })
+        }
+        XCTAssertEqual(failureCount, 1)
+        catalog.updateDestinations([], scheme: "Example", forProjectAt: 0)
+        controller.refreshConfiguration()
+        XCTAssertFalse(play.isEnabled)
     }
 
     @MainActor
@@ -645,6 +1042,14 @@ private final class RecordingProjectLauncher: ProjectLaunching, @unchecked Senda
 
 private final class DeferredProjectLauncher: ProjectLaunching, @unchecked Sendable {
     let logURL = URL(fileURLWithPath: "/tmp/deferred-build.log")
+    private var completion: (@Sendable (Result<URL, Error>) -> Void)?
 
-    func launch(completion: @escaping @Sendable (Result<URL, Error>) -> Void) {}
+    func launch(completion: @escaping @Sendable (Result<URL, Error>) -> Void) {
+        self.completion = completion
+    }
+
+    func complete(_ result: Result<URL, Error>) {
+        completion?(result)
+        completion = nil
+    }
 }

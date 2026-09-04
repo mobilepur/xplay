@@ -8,17 +8,37 @@
 XPlay is a macOS menu bar app for building and launching Xcode projects without
 keeping Xcode open.
 
-XPlay displays its X-and-Play icon in the menu bar and shows three animated dots
-beside it while building and launching a configuration. The project editor adds an `.xcworkspace`, discovers
-its schemes, and lets the developer enable multiple schemes with a separate destination
-for each one. The initial destination support covers the current Mac and installed iOS
-Simulators; physical iOS devices are intentionally excluded.
+The menu bar appearance is configurable in **Settings → Menu Bar Icon**:
 
-Right-clicking the icon shows the enabled schemes and their selected destinations,
-saved XPlay Projects, and global settings. **Accept Macros** is global, defaults to off,
-and requires confirmation before XPlay adds `-skipMacroValidation` to builds. One enabled
-scheme is selected for Play per XPlay Project. Choosing a scheme or one of its destinations
-in the status menu makes it active, and a left click builds and launches that selection.
+- **XPlay** — the X-and-Play icon (default).
+- **Name + Target** — the selected project's name and its Mac, iPhone, or iPad symbol.
+- **Name** — the selected project's name.
+- **Target** — the selected destination's device symbol.
+
+When the chosen content is unavailable, XPlay falls back to its icon. Long project
+names are truncated. Three animated dots appear underneath while a configuration
+is building and launching.
+
+The menu shows enabled schemes and their selected destinations, a large **Run Project**
+button, saved XPlay Projects, and global settings. The Run Project button builds and launches
+the selected configuration; it is disabled during a launch or without an available
+destination. **Left Click** and **Right Click** can each be set to **Play** or **Menu**.
+The current value appears in gray beside each setting's chevron. By default, left
+click starts Play and right click opens the menu. The actions are always paired:
+changing either click swaps the other, so one runs the project and the other opens
+the menu. The Run Project button uses the XPlay icon. The **About** section links the displayed
+version to its GitHub release notes and opens the GitHub issue reporter for problems.
+
+The project editor shows `.xcworkspace` files in a full-height sidebar. Selecting a
+workspace drills into its launch configurations beside it, where the developer can
+enable schemes and choose a separate destination for each one. The
+initial destination support covers the current Mac and installed iOS Simulators;
+physical iOS devices are intentionally excluded. One enabled scheme is selected for
+Play per XPlay Project. Choosing a scheme or one of its destinations in the status
+menu makes it active.
+
+**Accept Macros** is global, defaults to off, and requires confirmation before XPlay
+adds `-skipMacroValidation` to builds.
 Every configuration has its own build log. Existing `.xcodeproj` records remain readable
 for migration.
 
