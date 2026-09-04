@@ -492,6 +492,43 @@ final class StatusBarControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testRunningStatusShowsThreeAnimatedDotsBesideIconInsteadOfSpinner() throws {
+        try withState { catalog, settings in
+            let mac = XcodeDestination(platform: .macOS, id: "mac", name: "My Mac")
+            configure(catalog, schemes: ["Example"], destinations: [[mac]])
+            let controller = StatusBarController(
+                projectCatalog: catalog,
+                appSettings: settings,
+                makeLauncher: { _ in DeferredProjectLauncher() }
+            )
+
+            controller.perform(.startProject)
+
+            let button = try XCTUnwrap(controller.statusItem.button)
+            let views = descendants(of: button)
+            let runningIndicator = try XCTUnwrap(
+                views.first { $0.identifier?.rawValue == "running-indicator" }
+            )
+            let runningIcon = try XCTUnwrap(
+                views.compactMap { $0 as? NSImageView }.first {
+                    $0.identifier?.rawValue == "running-status-icon"
+                }
+            )
+            let dots = views.filter {
+                $0.identifier?.rawValue.hasPrefix("running-dot-") == true
+            }
+
+            XCTAssertFalse(runningIndicator.isHidden)
+            XCTAssertNotNil(runningIcon.image)
+            XCTAssertEqual(dots.count, 3)
+            XCTAssertTrue(dots.allSatisfy { $0.layer?.animation(forKey: "pulse") != nil })
+            XCTAssertTrue(views.compactMap { $0 as? NSProgressIndicator }.isEmpty)
+            XCTAssertNotEqual(controller.statusItem.length, NSStatusItem.squareLength)
+            XCTAssertNil(button.image)
+        }
+    }
+
+    @MainActor
     func testStatusProjectSelectionSynchronizesOpenEditorAndActionsTargetVisibleProject() async throws {
         let suiteName = "StatusBarControllerTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -581,6 +618,10 @@ final class StatusBarControllerTests: XCTestCase {
             ProjectCatalog(defaults: defaults, storageKey: "projects"),
             AppSettings(defaults: defaults, storageKey: "settings")
         )
+    }
+
+    private func descendants(of view: NSView) -> [NSView] {
+        view.subviews + view.subviews.flatMap(descendants(of:))
     }
 }
 

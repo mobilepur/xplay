@@ -1,10 +1,15 @@
 # XPlay
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/xplay-icon-dark.svg">
+  <img src="XPlay/Assets.xcassets/XPlayIcon.imageset/XPlayIcon.svg" width="105" height="90" alt="XPlay icon">
+</picture>
+
 XPlay is a macOS menu bar app for building and launching Xcode projects without
 keeping Xcode open.
 
-XPlay displays a Play icon in the menu bar and replaces it with an animated spinner
-while configurations are running. The project editor adds an `.xcworkspace`, discovers
+XPlay displays its X-and-Play icon in the menu bar and shows three animated dots
+beside it while building and launching a configuration. The project editor adds an `.xcworkspace`, discovers
 its schemes, and lets the developer enable multiple schemes with a separate destination
 for each one. The initial destination support covers the current Mac and installed iOS
 Simulators; physical iOS devices are intentionally excluded.

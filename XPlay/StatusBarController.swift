@@ -117,6 +117,95 @@ private final class ConfigurationMenuItemView: NSView {
     }
 }
 
+private final class RunningStatusView: NSStackView {
+    let iconImageView = NSImageView()
+    private let dots: [NSView]
+
+    override init(frame frameRect: NSRect) {
+        dots = (0..<3).map { index in
+            let dot = NSView()
+            dot.identifier = NSUserInterfaceItemIdentifier("running-dot-\(index)")
+            dot.wantsLayer = true
+            dot.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                dot.widthAnchor.constraint(equalToConstant: 3),
+                dot.heightAnchor.constraint(equalToConstant: 3),
+            ])
+            dot.layer?.cornerRadius = 1.5
+            return dot
+        }
+
+        super.init(frame: frameRect)
+
+        identifier = NSUserInterfaceItemIdentifier("running-indicator")
+        orientation = .horizontal
+        alignment = .centerY
+        spacing = 4
+        translatesAutoresizingMaskIntoConstraints = false
+        isHidden = true
+
+        iconImageView.identifier = NSUserInterfaceItemIdentifier("running-status-icon")
+        iconImageView.imageScaling = .scaleProportionallyDown
+        iconImageView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            iconImageView.widthAnchor.constraint(equalToConstant: 21),
+            iconImageView.heightAnchor.constraint(equalToConstant: 18),
+        ])
+        addArrangedSubview(iconImageView)
+
+        let dotsView = NSStackView(views: dots)
+        dotsView.orientation = .horizontal
+        dotsView.alignment = .centerY
+        dotsView.spacing = 3
+        addArrangedSubview(dotsView)
+        updateDotColors()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateDotColors()
+    }
+
+    func startAnimating() {
+        isHidden = false
+        for (index, dot) in dots.enumerated() {
+            guard let layer = dot.layer else { continue }
+            let animation = CAKeyframeAnimation(keyPath: "opacity")
+            animation.values = [0.25, 1, 0.25]
+            animation.keyTimes = [0, 0.5, 1]
+            animation.duration = 0.9
+            animation.beginTime = layer.convertTime(CACurrentMediaTime(), from: nil)
+                + (Double(index) * 0.18)
+            animation.fillMode = .both
+            animation.repeatCount = .infinity
+            layer.add(animation, forKey: "pulse")
+        }
+    }
+
+    func stopAnimating() {
+        for dot in dots {
+            dot.layer?.removeAnimation(forKey: "pulse")
+        }
+        isHidden = true
+    }
+
+    private func updateDotColors() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            let color = NSColor.labelColor.cgColor
+            dots.forEach { $0.layer?.backgroundColor = color }
+        }
+    }
+}
+
 @MainActor
 final class StatusBarController: NSObject, NSMenuDelegate {
     static let macroWarningText = "Accept Macros skips Xcode validation for all current and future macros in every XPlay project."
@@ -132,7 +221,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     private(set) var statusItem: NSStatusItem
-    private let progressIndicator: NSProgressIndicator
+    private let runningStatusView: RunningStatusView
     private let projectCatalog: ProjectCatalog?
     private let appSettings: AppSettings
     private let onEditProjects: (() -> Void)?
@@ -422,7 +511,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         self.makeLauncher = makeLauncher
         self.presentLaunchFailures = presentLaunchFailures ?? Self.presentDefaultLaunchFailures
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        progressIndicator = NSProgressIndicator()
+        runningStatusView = RunningStatusView()
 
         super.init()
 
@@ -434,16 +523,12 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         button.action = #selector(handleStatusItemClick)
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
 
-        progressIndicator.style = .spinning
-        progressIndicator.controlSize = .small
-        progressIndicator.isIndeterminate = true
-        progressIndicator.isDisplayedWhenStopped = false
-        progressIndicator.translatesAutoresizingMaskIntoConstraints = false
-        button.addSubview(progressIndicator)
+        runningStatusView.iconImageView.image = menuBarImage(description: "Project is starting")
+        button.addSubview(runningStatusView)
 
         NSLayoutConstraint.activate([
-            progressIndicator.centerXAnchor.constraint(equalTo: button.centerXAnchor),
-            progressIndicator.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+            runningStatusView.centerXAnchor.constraint(equalTo: button.centerXAnchor),
+            runningStatusView.centerYAnchor.constraint(equalTo: button.centerYAnchor),
         ])
 
         refreshConfiguration()
@@ -667,9 +752,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
         if running {
             button.image = nil
-            progressIndicator.startAnimation(nil)
+            statusItem.length = 48
+            runningStatusView.startAnimating()
         } else {
-            progressIndicator.stopAnimation(nil)
+            runningStatusView.stopAnimating()
+            statusItem.length = NSStatusItem.squareLength
             refreshConfiguration()
         }
     }
@@ -708,15 +795,17 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         } else {
             description = "No project scheme selected"
         }
-        button.image = menuBarImage(named: "play.fill", description: description)
+        button.image = menuBarImage(description: description)
         button.setAccessibilityLabel(canStart ? "Start project" : "\(description). Right-click for menu")
         button.toolTip = canStart
             ? "Start project"
             : "\(description) · Right-click for menu"
     }
 
-    private func menuBarImage(named name: String, description: String) -> NSImage? {
-        let image = NSImage(systemSymbolName: name, accessibilityDescription: description)
+    private func menuBarImage(description: String) -> NSImage? {
+        let image = NSImage(named: "XPlayIcon")
+        image?.size = NSSize(width: 21, height: 18)
+        image?.accessibilityDescription = description
         image?.isTemplate = true
         return image
     }

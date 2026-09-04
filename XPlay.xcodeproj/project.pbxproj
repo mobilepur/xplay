@@ -10,6 +10,7 @@
 		06F2142A97B9A4CF4BF4DC22 /* ProjectWindowControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 032E811A0BB38BEA0C7037D5 /* ProjectWindowControllerTests.swift */; };
 		12C3305174FED64AC9FCA365 /* XcodeProjectLaunchPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99A36F70A24E2A6B0C95D9B3 /* XcodeProjectLaunchPlan.swift */; };
 		12EEC989E2D4952C533CBE2D /* XPlayApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBC3158E7140F16D9947921D /* XPlayApp.swift */; };
+		1BB1A7FD274795D5D1096ED9 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 74A5BE8A8972C33DCDE89143 /* Assets.xcassets */; };
 		355105C4E7DDE5FB32EE196E /* AppSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 890034C894A39D7E72CCB89D /* AppSettingsTests.swift */; };
 		3E6D6F3FC34DAB0150EA36DB /* StatusBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F448FE2168DEBB85BD5F9471 /* StatusBarController.swift */; };
 		41F3FF50FB6BB93711B70E67 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3C3BB4A4F5038A7519D58C3 /* AppSettings.swift */; };
@@ -45,6 +46,7 @@
 		43644CEC06DE309FD951FBA5 /* ProjectCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectCatalog.swift; sourceTree = "<group>"; };
 		59B211DDF960805DB42DF190 /* XcodeSchemeResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XcodeSchemeResolver.swift; sourceTree = "<group>"; };
 		5CF71FA59D5E445078C7CD25 /* XPlay.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = XPlay.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		74A5BE8A8972C33DCDE89143 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		890034C894A39D7E72CCB89D /* AppSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettingsTests.swift; sourceTree = "<group>"; };
 		99A36F70A24E2A6B0C95D9B3 /* XcodeProjectLaunchPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XcodeProjectLaunchPlan.swift; sourceTree = "<group>"; };
 		A2E7CE6C6F9C69A1C599247E /* ProjectCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectCatalogTests.swift; sourceTree = "<group>"; };
@@ -94,6 +96,7 @@
 			children = (
 				0D0EEBA2BC9E2B8F992A9CA8 /* AppDelegate.swift */,
 				F3C3BB4A4F5038A7519D58C3 /* AppSettings.swift */,
+				74A5BE8A8972C33DCDE89143 /* Assets.xcassets */,
 				43644CEC06DE309FD951FBA5 /* ProjectCatalog.swift */,
 				C934D8CB6799EAFC613A70F6 /* ProjectWindowController.swift */,
 				F448FE2168DEBB85BD5F9471 /* StatusBarController.swift */,
@@ -113,6 +116,7 @@
 			buildConfigurationList = 6FE3003AEC039A22A0572A52 /* Build configuration list for PBXNativeTarget "XPlay" */;
 			buildPhases = (
 				08261F8EC9CD38A42E7B38CA /* Sources */,
+				D3802392B197644EBC92D338 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -173,6 +177,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		D3802392B197644EBC92D338 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1BB1A7FD274795D5D1096ED9 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		08261F8EC9CD38A42E7B38CA /* Sources */ = {
