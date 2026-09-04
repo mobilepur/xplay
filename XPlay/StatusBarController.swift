@@ -44,7 +44,14 @@ final class StatusBarController: NSObject {
         if let project = projectCatalog?.selectedProject {
             let configurations = project.enabledConfigurations
             for configuration in configurations {
-                menu.addItem(makeConfigurationItem(configuration, projectURL: project.url))
+                menu.addItem(
+                    makeConfigurationItem(
+                        configuration,
+                        projectURL: project.url,
+                        isSelectedForPlay: configuration.scheme
+                            == project.selectedLaunchConfigurationScheme
+                    )
+                )
             }
         }
         menu.addItem(.separator())
@@ -80,16 +87,7 @@ final class StatusBarController: NSObject {
         settingsItem.isEnabled = false
         menu.addItem(settingsItem)
 
-        let macrosItem = NSMenuItem(
-            title: "Accept Macros",
-            action: #selector(toggleMacroAcceptance),
-            keyEquivalent: ""
-        )
-        macrosItem.target = self
-        macrosItem.state = appSettings.acceptsMacros ? .on : .off
-        macrosItem.isEnabled = true
-        macrosItem.toolTip = Self.macroWarningText
-        menu.addItem(macrosItem)
+        menu.addItem(makeMacroAcceptanceItem())
         menu.addItem(.separator())
 
         let quitItem = NSMenuItem(
@@ -106,7 +104,8 @@ final class StatusBarController: NSObject {
 
     private func makeConfigurationItem(
         _ configuration: LaunchConfiguration,
-        projectURL: URL
+        projectURL: URL,
+        isSelectedForPlay: Bool
     ) -> NSMenuItem {
         let destinationTitle: String
         if let destination = configuration.selectedDestination {
@@ -121,8 +120,24 @@ final class StatusBarController: NSObject {
             action: nil,
             keyEquivalent: ""
         )
+        item.state = isSelectedForPlay ? .on : .off
         let submenu = NSMenu(title: configuration.scheme)
         submenu.autoenablesItems = false
+
+        let useForPlayItem = NSMenuItem(
+            title: "Use for Play",
+            action: #selector(selectLaunchConfiguration(_:)),
+            keyEquivalent: ""
+        )
+        useForPlayItem.target = self
+        useForPlayItem.representedObject = [
+            "projectPath": projectURL.path,
+            "scheme": configuration.scheme,
+        ]
+        useForPlayItem.state = isSelectedForPlay ? .on : .off
+        useForPlayItem.isEnabled = true
+        submenu.addItem(useForPlayItem)
+        submenu.addItem(.separator())
 
         if
             let unavailableDestination = configuration.selectedDestination,
@@ -200,6 +215,41 @@ final class StatusBarController: NSObject {
         ])
 
         item.view = headerView
+        return item
+    }
+
+    private func makeMacroAcceptanceItem() -> NSMenuItem {
+        let item = NSMenuItem(title: "Accept Macros", action: nil, keyEquivalent: "")
+        item.isEnabled = true
+
+        let rowView = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 32))
+        rowView.autoresizingMask = [.width]
+
+        let label = NSTextField(labelWithString: "Accept Macros")
+        label.font = .menuFont(ofSize: NSFont.systemFontSize)
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        let toggle = NSSwitch(frame: .zero)
+        toggle.controlSize = .small
+        toggle.state = appSettings.acceptsMacros ? .on : .off
+        toggle.target = self
+        toggle.action = #selector(setMacroAcceptance(_:))
+        toggle.toolTip = Self.macroWarningText
+        toggle.setAccessibilityLabel("Accept Macros")
+        toggle.translatesAutoresizingMaskIntoConstraints = false
+
+        rowView.addSubview(label)
+        rowView.addSubview(toggle)
+
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: rowView.leadingAnchor, constant: 12),
+            label.centerYAnchor.constraint(equalTo: rowView.centerYAnchor),
+            toggle.leadingAnchor.constraint(greaterThanOrEqualTo: label.trailingAnchor, constant: 12),
+            toggle.trailingAnchor.constraint(equalTo: rowView.trailingAnchor, constant: -12),
+            toggle.centerYAnchor.constraint(equalTo: rowView.centerYAnchor),
+        ])
+
+        item.view = rowView
         return item
     }
 
@@ -322,24 +372,20 @@ final class StatusBarController: NSObject {
     private func startProject() {
         guard
             !isRunning,
-            let project = projectCatalog?.selectedProject
-        else {
-            return
-        }
-        let plans = XcodeProjectLaunchPlan.makeAll(
-            for: project,
-            cacheDirectory: cacheDirectory,
-            acceptsMacros: appSettings.acceptsMacros
-        )
-        guard
-            !plans.isEmpty,
-            plans.count == project.enabledConfigurations.count
+            let project = projectCatalog?.selectedProject,
+            let configuration = project.selectedLaunchConfiguration,
+            let plan = XcodeProjectLaunchPlan.make(
+                for: project,
+                configuration: configuration,
+                cacheDirectory: cacheDirectory,
+                acceptsMacros: appSettings.acceptsMacros
+            )
         else {
             return
         }
 
         setRunning(true)
-        launchNext(in: plans, at: 0, failures: [])
+        launchNext(in: [plan], at: 0, failures: [])
     }
 
     private func launchNext(
@@ -418,20 +464,49 @@ final class StatusBarController: NSObject {
             scheme: scheme,
             forProjectAt: projectIndex
         )
+        projectCatalog?.selectLaunchConfiguration(
+            scheme: scheme,
+            forProjectAt: projectIndex
+        )
+        finishCatalogSelection()
+    }
+
+    @objc
+    private func selectLaunchConfiguration(_ item: NSMenuItem) {
+        guard
+            let selection = item.representedObject as? [String: String],
+            let projectPath = selection["projectPath"],
+            let scheme = selection["scheme"],
+            let projectIndex = projectCatalog?.projects.firstIndex(where: {
+                $0.url.path == projectPath
+            })
+        else {
+            return
+        }
+
+        projectCatalog?.selectLaunchConfiguration(
+            scheme: scheme,
+            forProjectAt: projectIndex
+        )
+        finishCatalogSelection()
+    }
+
+    private func finishCatalogSelection() {
         onCatalogChange?()
         contextMenu = makeContextMenu()
         refreshConfiguration()
     }
 
     @objc
-    private func toggleMacroAcceptance() {
-        if appSettings.acceptsMacros {
-            appSettings.setAcceptsMacros(false)
-        } else {
+    private func setMacroAcceptance(_ toggle: NSSwitch) {
+        if toggle.state == .on {
             guard confirmMacroAcceptance() else {
+                toggle.state = .off
                 return
             }
             appSettings.setAcceptsMacros(true)
+        } else {
+            appSettings.setAcceptsMacros(false)
         }
         contextMenu = makeContextMenu()
     }
@@ -462,9 +537,14 @@ final class StatusBarController: NSObject {
         guard isRunning, let button = statusItem.button else {
             return
         }
-        let position = "\(index + 1) of \(total)"
-        button.setAccessibilityLabel("Starting \(plan.scheme) (\(position))")
-        button.toolTip = "Building and launching \(plan.scheme) (\(position))…"
+        if total == 1 {
+            button.setAccessibilityLabel("Starting \(plan.scheme)")
+            button.toolTip = "Building and launching \(plan.scheme)…"
+        } else {
+            let position = "\(index + 1) of \(total)"
+            button.setAccessibilityLabel("Starting \(plan.scheme) (\(position))")
+            button.toolTip = "Building and launching \(plan.scheme) (\(position))…"
+        }
     }
 
     func refreshConfiguration() {
@@ -472,16 +552,14 @@ final class StatusBarController: NSObject {
             return
         }
 
-        let configurations = projectCatalog?.selectedProject?.enabledConfigurations ?? []
-        let hasEnabledSchemes = !configurations.isEmpty
-        let canStart = hasEnabledSchemes && configurations.allSatisfy {
-            $0.isSelectedDestinationAvailable
-        }
+        let configuration = projectCatalog?.selectedProject?.selectedLaunchConfiguration
+        let hasSelectedScheme = configuration != nil
+        let canStart = configuration?.isSelectedDestinationAvailable == true
         let description: String
         if canStart {
             description = "Start project"
-        } else if hasEnabledSchemes {
-            description = "Choose a destination for every enabled scheme"
+        } else if hasSelectedScheme {
+            description = "Choose a destination for the selected scheme"
         } else {
             description = "No project scheme selected"
         }

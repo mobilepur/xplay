@@ -390,6 +390,10 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
             scheme: scheme,
             forProjectAt: projectIndex
         )
+        catalog.selectLaunchConfiguration(
+            scheme: scheme,
+            forProjectAt: projectIndex
+        )
         reloadTables()
         onCatalogChange?()
     }

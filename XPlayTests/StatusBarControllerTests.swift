@@ -72,9 +72,59 @@ final class StatusBarControllerTests: XCTestCase {
                     "Example-iOS — iPhone 17 Pro (26.0)",
                 ]
             )
-            XCTAssertEqual(items[1].submenu?.items.map(\.title), ["My Mac"])
-            XCTAssertEqual(items[1].submenu?.items.first?.state, .on)
-            XCTAssertEqual(items[2].submenu?.items.map(\.title), ["iPhone 17 Pro (26.0)"])
+            XCTAssertEqual(
+                items[1].submenu?.items.map(\.title),
+                ["Use for Play", "", "My Mac"]
+            )
+            XCTAssertEqual(
+                items[2].submenu?.items.map(\.title),
+                ["Use for Play", "", "iPhone 17 Pro (26.0)"]
+            )
+            XCTAssertEqual(
+                items[1].submenu?.items.first { $0.title == "My Mac" }?.state,
+                .on
+            )
+            XCTAssertEqual(items[1].state, .on)
+            XCTAssertEqual(items[2].state, .off)
+        }
+    }
+
+    @MainActor
+    func testSelectingSchemeForPlayUpdatesMenuSelection() throws {
+        try withState { catalog, settings in
+            let mac = XcodeDestination(platform: .macOS, id: "mac", name: "My Mac")
+            let simulator = XcodeDestination(
+                platform: .iOSSimulator,
+                id: "sim",
+                name: "iPhone 17 Pro"
+            )
+            configure(
+                catalog,
+                schemes: ["Example-macOS", "Example-iOS"],
+                destinations: [[mac], [simulator]]
+            )
+            let controller = StatusBarController(
+                projectCatalog: catalog,
+                appSettings: settings
+            )
+            let iosItem = try XCTUnwrap(
+                controller.contextMenu.items.first { $0.title.hasPrefix("Example-iOS") }
+            )
+            let useForPlayItem = try XCTUnwrap(
+                iosItem.submenu?.items.first { $0.title == "Use for Play" }
+            )
+            let submenu = try XCTUnwrap(useForPlayItem.menu)
+
+            submenu.performActionForItem(at: submenu.index(of: useForPlayItem))
+
+            XCTAssertEqual(
+                catalog.selectedProject?.selectedLaunchConfiguration?.scheme,
+                "Example-iOS"
+            )
+            let refreshedSchemes = controller.contextMenu.items.filter {
+                $0.title.hasPrefix("Example-")
+            }
+            XCTAssertEqual(refreshedSchemes.map(\.state), [.off, .on])
         }
     }
 
@@ -100,12 +150,19 @@ final class StatusBarControllerTests: XCTestCase {
                 controller.contextMenu.items.first { $0.title.hasPrefix("Example-iOS") }
             )
             let submenu = try XCTUnwrap(schemeItem.submenu)
+            let secondDestination = try XCTUnwrap(
+                submenu.items.first { $0.title == "iPhone 17 Pro" }
+            )
 
-            submenu.performActionForItem(at: 1)
+            submenu.performActionForItem(at: submenu.index(of: secondDestination))
 
             XCTAssertEqual(
                 catalog.selectedProject?.enabledConfigurations.first?.selectedDestination,
                 second
+            )
+            XCTAssertEqual(
+                catalog.selectedProject?.selectedLaunchConfiguration?.scheme,
+                "Example-iOS"
             )
         }
     }
@@ -125,10 +182,21 @@ final class StatusBarControllerTests: XCTestCase {
             let item = try XCTUnwrap(
                 controller.contextMenu.items.first { $0.title == "Accept Macros" }
             )
-            let menu = try XCTUnwrap(item.menu)
+            let row = try XCTUnwrap(item.view)
+            let label = try XCTUnwrap(
+                row.subviews.compactMap { $0 as? NSTextField }.first
+            )
+            let toggle = try XCTUnwrap(
+                row.subviews.compactMap { $0 as? NSSwitch }.first
+            )
+            row.layoutSubtreeIfNeeded()
 
-            XCTAssertEqual(item.state, .off)
-            menu.performActionForItem(at: menu.index(of: item))
+            XCTAssertEqual(label.stringValue, "Accept Macros")
+            XCTAssertGreaterThan(toggle.frame.minX, label.frame.maxX)
+            XCTAssertEqual(toggle.state, .off)
+            XCTAssertEqual(toggle.accessibilityLabel(), "Accept Macros")
+            XCTAssertEqual(toggle.toolTip, StatusBarController.macroWarningText)
+            toggle.performClick(nil)
 
             XCTAssertTrue(settings.acceptsMacros)
             XCTAssertEqual(confirmationCount, 1)
@@ -137,7 +205,59 @@ final class StatusBarControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testStatusItemRequiresEveryEnabledSchemeToHaveDestination() {
+    func testCancellingMacroAcceptanceLeavesSwitchOff() throws {
+        try withState { catalog, settings in
+            let controller = StatusBarController(
+                projectCatalog: catalog,
+                appSettings: settings,
+                confirmMacroAcceptance: { false }
+            )
+            let item = try XCTUnwrap(
+                controller.contextMenu.items.first { $0.title == "Accept Macros" }
+            )
+            let row = try XCTUnwrap(item.view)
+            let toggle = try XCTUnwrap(
+                row.subviews.compactMap { $0 as? NSSwitch }.first
+            )
+
+            toggle.performClick(nil)
+
+            XCTAssertEqual(toggle.state, .off)
+            XCTAssertFalse(settings.acceptsMacros)
+        }
+    }
+
+    @MainActor
+    func testEnabledMacroSwitchCanBeDisabledWithoutConfirmation() throws {
+        try withState { catalog, settings in
+            settings.setAcceptsMacros(true)
+            var confirmationCount = 0
+            let controller = StatusBarController(
+                projectCatalog: catalog,
+                appSettings: settings,
+                confirmMacroAcceptance: {
+                    confirmationCount += 1
+                    return true
+                }
+            )
+            let item = try XCTUnwrap(
+                controller.contextMenu.items.first { $0.title == "Accept Macros" }
+            )
+            let row = try XCTUnwrap(item.view)
+            let toggle = try XCTUnwrap(
+                row.subviews.compactMap { $0 as? NSSwitch }.first
+            )
+
+            XCTAssertEqual(toggle.state, .on)
+            toggle.performClick(nil)
+
+            XCTAssertFalse(settings.acceptsMacros)
+            XCTAssertEqual(confirmationCount, 0)
+        }
+    }
+
+    @MainActor
+    func testStatusItemRequiresSelectedSchemeToHaveDestination() {
         withState { catalog, settings in
             configure(catalog, schemes: ["Example"], destinations: [[]])
             let controller = StatusBarController(
@@ -147,7 +267,7 @@ final class StatusBarControllerTests: XCTestCase {
 
             XCTAssertEqual(
                 controller.statusItem.button?.accessibilityLabel(),
-                "Choose a destination for every enabled scheme. Right-click for menu"
+                "Choose a destination for the selected scheme. Right-click for menu"
             )
 
             let mac = XcodeDestination(platform: .macOS, id: "mac", name: "My Mac")
@@ -159,7 +279,7 @@ final class StatusBarControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testStartingProjectLaunchesEveryConfigurationSequentiallyAfterFailure() async {
+    func testStartingProjectLaunchesOnlySelectedConfiguration() {
         let suiteName = "StatusBarControllerTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -177,33 +297,22 @@ final class StatusBarControllerTests: XCTestCase {
             schemes: ["Example-macOS", "Example-iOS"],
             destinations: [[mac], [simulator]]
         )
-        let finished = expectation(description: "All launch configurations finished")
         var receivedPlans: [XcodeProjectLaunchPlan] = []
-        var receivedFailures: [StatusBarController.LaunchFailure] = []
+        catalog.selectLaunchConfiguration(scheme: "Example-iOS", forProjectAt: 0)
         let controller = StatusBarController(
             projectCatalog: catalog,
             appSettings: settings,
             cacheDirectory: URL(fileURLWithPath: "/Caches/XPlay"),
             makeLauncher: { plan in
                 receivedPlans.append(plan)
-                let result: Result<URL, Error> = plan.scheme == "Example-macOS"
-                    ? .failure(TestLaunchError.failed)
-                    : .success(URL(fileURLWithPath: "/tmp/Example.app"))
-                return RecordingProjectLauncher(logURL: plan.logURL, result: result)
-            },
-            presentLaunchFailures: { failures in
-                receivedFailures = failures
-                finished.fulfill()
+                return DeferredProjectLauncher()
             }
         )
 
         controller.perform(.startProject)
-        await fulfillment(of: [finished], timeout: 2)
 
-        XCTAssertEqual(receivedPlans.map(\.scheme), ["Example-macOS", "Example-iOS"])
+        XCTAssertEqual(receivedPlans.map(\.scheme), ["Example-iOS"])
         XCTAssertTrue(receivedPlans.allSatisfy(\.acceptsMacros))
-        XCTAssertEqual(receivedFailures.map(\.plan.scheme), ["Example-macOS"])
-        XCTAssertEqual(controller.statusItem.button?.accessibilityLabel(), "Start project")
     }
 
     @MainActor
@@ -220,6 +329,7 @@ final class StatusBarControllerTests: XCTestCase {
                 schemes: ["Example-macOS", "Example-iOS"],
                 destinations: [[mac], [simulator]]
             )
+            catalog.selectLaunchConfiguration(scheme: "Example-iOS", forProjectAt: 0)
             let launcher = DeferredProjectLauncher()
             let controller = StatusBarController(
                 projectCatalog: catalog,
@@ -231,11 +341,11 @@ final class StatusBarControllerTests: XCTestCase {
 
             XCTAssertEqual(
                 controller.statusItem.button?.accessibilityLabel(),
-                "Starting Example-macOS (1 of 2)"
+                "Starting Example-iOS"
             )
             XCTAssertEqual(
                 controller.statusItem.button?.toolTip,
-                "Building and launching Example-macOS (1 of 2)…"
+                "Building and launching Example-iOS…"
             )
         }
     }

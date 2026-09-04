@@ -3,8 +3,8 @@
 ## Goal
 
 Let a developer define an XPlay Project from an Xcode workspace, enable multiple app
-schemes, choose one compatible destination for each scheme, and build and launch every
-enabled configuration with one click.
+schemes, choose one compatible destination for each scheme, and select the configuration
+that the Play button builds and launches.
 
 ## Audience
 
@@ -28,6 +28,10 @@ macOS and iOS applications together without keeping Xcode open.
 - The status menu lists every enabled scheme beneath the selected XPlay Project.
 - Each scheme has a destination submenu containing only concrete destinations supported
   by that scheme.
+- Exactly one enabled scheme is selected for Play per XPlay Project and is marked with a
+  checkmark in the status menu.
+- Choosing a scheme for Play, or choosing one of its destinations, persists that scheme
+  as the active launch configuration.
 - Placeholder destinations such as `Any iOS Simulator Device` are not selectable.
 - If exactly one concrete destination is available, XPlay may select it automatically.
 - If multiple destinations are available, the developer must choose one explicitly.
@@ -36,20 +40,19 @@ macOS and iOS applications together without keeping Xcode open.
 
 ### Launching
 
-- A left-click on the Play icon executes every enabled launch configuration for the
-  selected XPlay Project sequentially.
+- A left-click on the Play icon executes the selected launch configuration for the
+  selected XPlay Project.
 - A macOS configuration builds and opens its app on the selected Mac destination.
 - An iOS Simulator configuration builds, boots the simulator when necessary, installs
   the app, and launches it.
-- A failure in one configuration does not prevent later configurations from running.
-- Completion reports failures per launch configuration and preserves separate build logs.
-- The menu bar tooltip and accessibility label expose the current progress, including
-  the configuration position when more than one configuration runs.
+- Completion reports a launch failure for the selected configuration and preserves its
+  separate build log.
+- The menu bar tooltip and accessibility label name the configuration being launched.
 
 ### Global settings
 
 - The status menu contains a `Settings` section.
-- `Accept Macros` is a global checkbox in that section and no longer appears in a project
+- `Accept Macros` is a global switch in that section and no longer appears in a project
   row.
 - Macro acceptance defaults to off.
 - Enabling it requires an explicit warning that validation is skipped for all current
@@ -79,7 +82,7 @@ macOS and iOS applications together without keeping Xcode open.
 - Per-scheme destination selection
 - Current Mac destinations
 - iOS Simulator destinations
-- Sequential multi-configuration build and launch
+- One selected launch configuration per XPlay Project
 - Global macro acceptance
 - Persistence and legacy `.xcodeproj` compatibility
 
@@ -98,7 +101,8 @@ macOS and iOS applications together without keeping Xcode open.
 3. `Earnie-macOS` can select `My Mac`; `Earnie-iOS` can select an installed iOS Simulator.
 4. The status menu displays both enabled schemes and their selected destinations beneath
    `Earnie`.
-5. One Play click builds and launches both configurations sequentially.
+5. Selecting either configuration in the status menu persists it, and one Play click
+   builds and launches only that selected configuration.
 6. Device placeholders and physical iOS devices are not selectable in the initial scope.
 7. Removing or renaming a simulator does not silently redirect a launch to another device.
 8. `Accept Macros` appears only in the global Settings section, defaults off, persists,

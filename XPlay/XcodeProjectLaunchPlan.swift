@@ -47,38 +47,38 @@ struct XcodeProjectLaunchPlan: Equatable {
 }
 
 extension XcodeProjectLaunchPlan {
-    static func makeAll(
+    static func make(
         for project: SavedProject,
+        configuration: LaunchConfiguration,
         cacheDirectory: URL,
         acceptsMacros: Bool
-    ) -> [Self] {
-        project.enabledConfigurations.compactMap { configuration in
-            guard
-                configuration.isSelectedDestinationAvailable,
-                let destination = configuration.selectedDestination
-            else {
-                return nil
-            }
-            let filenameScheme = configuration.scheme
-                .replacingOccurrences(of: "/", with: "-")
-                .replacingOccurrences(of: ":", with: "-")
-            return Self(
-                containerURL: project.url,
-                containerKind: project.kind,
-                scheme: configuration.scheme,
-                destination: destination,
-                derivedDataURL: cacheDirectory
-                    .appendingPathComponent("DerivedData", isDirectory: true)
-                    .appendingPathComponent(project.name, isDirectory: true)
-                    .appendingPathComponent(filenameScheme, isDirectory: true),
-                logURL: cacheDirectory
-                    .appendingPathComponent("Logs", isDirectory: true)
-                    .appendingPathComponent(
-                        "\(project.name)-\(filenameScheme)-build.log"
-                    ),
-                productName: project.name,
-                acceptsMacros: acceptsMacros
-            )
+    ) -> Self? {
+        guard
+            configuration.isEnabled,
+            configuration.isSelectedDestinationAvailable,
+            let destination = configuration.selectedDestination
+        else {
+            return nil
         }
+        let filenameScheme = configuration.scheme
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+        return Self(
+            containerURL: project.url,
+            containerKind: project.kind,
+            scheme: configuration.scheme,
+            destination: destination,
+            derivedDataURL: cacheDirectory
+                .appendingPathComponent("DerivedData", isDirectory: true)
+                .appendingPathComponent(project.name, isDirectory: true)
+                .appendingPathComponent(filenameScheme, isDirectory: true),
+            logURL: cacheDirectory
+                .appendingPathComponent("Logs", isDirectory: true)
+                .appendingPathComponent(
+                    "\(project.name)-\(filenameScheme)-build.log"
+                ),
+            productName: project.name,
+            acceptsMacros: acceptsMacros
+        )
     }
 }

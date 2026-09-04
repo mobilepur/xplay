@@ -85,6 +85,68 @@ final class ProjectCatalogTests: XCTestCase {
     }
 
     @MainActor
+    func testSelectedLaunchConfigurationPersistsAndFallsBackWhenDisabled() {
+        withDefaults { defaults in
+            let workspaceURL = URL(fileURLWithPath: "/Projects/Example.xcworkspace")
+            let catalog = ProjectCatalog(defaults: defaults, storageKey: "projects")
+            catalog.add(workspaceURL, schemes: ["Example-macOS", "Example-iOS"])
+            catalog.setSchemeEnabled(true, scheme: "Example-macOS", forProjectAt: 0)
+            catalog.setSchemeEnabled(true, scheme: "Example-iOS", forProjectAt: 0)
+
+            XCTAssertEqual(
+                catalog.selectedProject?.selectedLaunchConfiguration?.scheme,
+                "Example-macOS"
+            )
+
+            catalog.selectLaunchConfiguration(scheme: "Example-iOS", forProjectAt: 0)
+
+            XCTAssertEqual(
+                catalog.selectedProject?.selectedLaunchConfiguration?.scheme,
+                "Example-iOS"
+            )
+            XCTAssertEqual(
+                ProjectCatalog(defaults: defaults, storageKey: "projects")
+                    .selectedProject?.selectedLaunchConfiguration?.scheme,
+                "Example-iOS"
+            )
+
+            catalog.setSchemeEnabled(false, scheme: "Example-iOS", forProjectAt: 0)
+
+            XCTAssertEqual(
+                catalog.selectedProject?.selectedLaunchConfiguration?.scheme,
+                "Example-macOS"
+            )
+        }
+    }
+
+    @MainActor
+    func testExistingWorkspaceRecordSelectsFirstEnabledConfiguration() throws {
+        try withDefaults { defaults in
+            let workspaceURL = URL(fileURLWithPath: "/Projects/Example.xcworkspace")
+            let previousRecord = PreviouslySavedProject(
+                url: workspaceURL,
+                kind: .workspace,
+                configurations: [
+                    LaunchConfiguration(scheme: "Disabled"),
+                    LaunchConfiguration(scheme: "Enabled", isEnabled: true),
+                ]
+            )
+            defaults.set(
+                try JSONEncoder().encode([previousRecord]),
+                forKey: "projects.records.v2"
+            )
+            defaults.set(workspaceURL.path, forKey: "projects.selected")
+
+            let catalog = ProjectCatalog(defaults: defaults, storageKey: "projects")
+
+            XCTAssertEqual(
+                catalog.selectedProject?.selectedLaunchConfiguration?.scheme,
+                "Enabled"
+            )
+        }
+    }
+
+    @MainActor
     func testRefreshingSchemesPreservesMatchingConfiguration() {
         withDefaults { defaults in
             let workspaceURL = URL(fileURLWithPath: "/Projects/Example.xcworkspace")
@@ -157,13 +219,19 @@ final class ProjectCatalogTests: XCTestCase {
         }
     }
 
-    private func withDefaults(_ body: (UserDefaults) -> Void) {
+    private struct PreviouslySavedProject: Encodable {
+        let url: URL
+        let kind: XcodeContainerKind
+        let configurations: [LaunchConfiguration]
+    }
+
+    private func withDefaults(_ body: (UserDefaults) throws -> Void) rethrows {
         let suiteName = "ProjectCatalogTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer {
             defaults.removePersistentDomain(forName: suiteName)
         }
 
-        body(defaults)
+        try body(defaults)
     }
 }

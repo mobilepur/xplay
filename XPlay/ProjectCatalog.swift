@@ -92,15 +92,20 @@ struct SavedProject: Codable, Equatable {
     let url: URL
     let kind: XcodeContainerKind
     var configurations: [LaunchConfiguration]
+    var selectedLaunchConfigurationScheme: String?
 
     init(
         url: URL,
         kind: XcodeContainerKind,
-        configurations: [LaunchConfiguration] = []
+        configurations: [LaunchConfiguration] = [],
+        selectedLaunchConfigurationScheme: String? = nil
     ) {
         self.url = url.standardizedFileURL
         self.kind = kind
         self.configurations = configurations
+        self.selectedLaunchConfigurationScheme = configurations.first(where: {
+            $0.isEnabled && $0.scheme == selectedLaunchConfigurationScheme
+        })?.scheme ?? configurations.first(where: \.isEnabled)?.scheme
     }
 
     var name: String {
@@ -113,6 +118,13 @@ struct SavedProject: Codable, Equatable {
 
     var enabledConfigurations: [LaunchConfiguration] {
         configurations.filter(\.isEnabled)
+    }
+
+    var selectedLaunchConfiguration: LaunchConfiguration? {
+        guard let selectedLaunchConfigurationScheme else {
+            return nil
+        }
+        return enabledConfigurations.first { $0.scheme == selectedLaunchConfigurationScheme }
     }
 }
 
@@ -138,7 +150,8 @@ final class ProjectCatalog {
                 SavedProject(
                     url: $0.url,
                     kind: $0.kind,
-                    configurations: $0.configurations
+                    configurations: $0.configurations,
+                    selectedLaunchConfigurationScheme: $0.selectedLaunchConfigurationScheme
                 )
             }
         } else {
@@ -273,6 +286,18 @@ final class ProjectCatalog {
         finishProjectMutation(at: index)
     }
 
+    func selectLaunchConfiguration(scheme: String, forProjectAt index: Int) {
+        guard
+            projects.indices.contains(index),
+            projects[index].enabledConfigurations.contains(where: { $0.scheme == scheme })
+        else {
+            return
+        }
+
+        projects[index].selectedLaunchConfigurationScheme = scheme
+        finishProjectMutation(at: index)
+    }
+
     @discardableResult
     func removeProject(at index: Int) -> Bool {
         guard projects.indices.contains(index) else {
@@ -288,6 +313,10 @@ final class ProjectCatalog {
     }
 
     private func finishProjectMutation(at index: Int) {
+        if projects[index].selectedLaunchConfiguration == nil {
+            projects[index].selectedLaunchConfigurationScheme = projects[index]
+                .enabledConfigurations.first?.scheme
+        }
         if selectedProject?.url == projects[index].url {
             selectedProject = projects[index]
         }

@@ -34,8 +34,7 @@ final class XcodeProjectLaunchPlanTests: XCTestCase {
         )
     }
 
-    func testCreatesOnePlanPerEnabledConfigurationWithSeparateLogs() {
-        let mac = XcodeDestination(platform: .macOS, id: "mac-id", name: "My Mac")
+    func testCreatesPlanForSelectedConfigurationWithSchemeSpecificPaths() throws {
         let simulator = XcodeDestination(
             platform: .iOSSimulator,
             id: "sim-id",
@@ -46,13 +45,6 @@ final class XcodeProjectLaunchPlanTests: XCTestCase {
             kind: .workspace,
             configurations: [
                 LaunchConfiguration(
-                    scheme: "Example-macOS",
-                    isEnabled: true,
-                    availableDestinations: [mac],
-                    selectedDestinationID: mac.id
-                ),
-                LaunchConfiguration(scheme: "Disabled"),
-                LaunchConfiguration(
                     scheme: "Example-iOS",
                     isEnabled: true,
                     availableDestinations: [simulator],
@@ -61,28 +53,24 @@ final class XcodeProjectLaunchPlanTests: XCTestCase {
             ]
         )
 
-        let plans = XcodeProjectLaunchPlan.makeAll(
+        let configuration = try XCTUnwrap(project.selectedLaunchConfiguration)
+        let plan = try XCTUnwrap(XcodeProjectLaunchPlan.make(
             for: project,
+            configuration: configuration,
             cacheDirectory: URL(fileURLWithPath: "/Caches/XPlay"),
             acceptsMacros: true
-        )
+        ))
 
-        XCTAssertEqual(plans.map(\.scheme), ["Example-macOS", "Example-iOS"])
+        XCTAssertEqual(plan.scheme, "Example-iOS")
         XCTAssertEqual(
-            plans.map(\.derivedDataURL.path),
-            [
-                "/Caches/XPlay/DerivedData/Example/Example-macOS",
-                "/Caches/XPlay/DerivedData/Example/Example-iOS",
-            ]
+            plan.derivedDataURL.path,
+            "/Caches/XPlay/DerivedData/Example/Example-iOS"
         )
         XCTAssertEqual(
-            plans.map(\.logURL.path),
-            [
-                "/Caches/XPlay/Logs/Example-Example-macOS-build.log",
-                "/Caches/XPlay/Logs/Example-Example-iOS-build.log",
-            ]
+            plan.logURL.path,
+            "/Caches/XPlay/Logs/Example-Example-iOS-build.log"
         )
-        XCTAssertTrue(plans.allSatisfy { $0.acceptsMacros })
+        XCTAssertTrue(plan.acceptsMacros)
     }
 
     private func makePlan(

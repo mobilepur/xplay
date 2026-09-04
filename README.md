@@ -11,10 +11,11 @@ Simulators; physical iOS devices are intentionally excluded.
 
 Right-clicking the icon shows the enabled schemes and their selected destinations,
 saved XPlay Projects, and global settings. **Accept Macros** is global, defaults to off,
-and requires confirmation before XPlay adds `-skipMacroValidation` to builds. A left
-click builds and launches every enabled configuration sequentially. Failures do not
-prevent later configurations from running, and every configuration has its own build
-log. Existing `.xcodeproj` records remain readable for migration.
+and requires confirmation before XPlay adds `-skipMacroValidation` to builds. One enabled
+scheme is selected for Play per XPlay Project. Choosing a scheme or one of its destinations
+in the status menu makes it active, and a left click builds and launches that selection.
+Every configuration has its own build log. Existing `.xcodeproj` records remain readable
+for migration.
 
 ## Requirements
 

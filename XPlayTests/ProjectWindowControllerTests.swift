@@ -104,6 +104,46 @@ final class ProjectWindowControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testChoosingDestinationMakesSchemeActiveForPlay() throws {
+        try withCatalog { catalog in
+            let workspaceURL = URL(fileURLWithPath: "/Projects/Example.xcworkspace")
+            let mac = XcodeDestination(platform: .macOS, id: "mac", name: "My Mac")
+            let simulator = XcodeDestination(
+                platform: .iOSSimulator,
+                id: "sim",
+                name: "iPhone 17 Pro"
+            )
+            catalog.add(workspaceURL, schemes: ["Example-macOS", "Example-iOS"])
+            catalog.setSchemeEnabled(true, scheme: "Example-macOS", forProjectAt: 0)
+            catalog.updateDestinations([mac], scheme: "Example-macOS", forProjectAt: 0)
+            catalog.setSchemeEnabled(true, scheme: "Example-iOS", forProjectAt: 0)
+            catalog.updateDestinations([simulator], scheme: "Example-iOS", forProjectAt: 0)
+            let controller = ProjectWindowController(catalog: catalog)
+            controller.loadWindow()
+            let iosCell = try XCTUnwrap(
+                controller.tableView(
+                    controller.schemeTableView,
+                    viewFor: controller.schemeTableView.tableColumns[0],
+                    row: 1
+                )
+            )
+            let selector = try XCTUnwrap(
+                descendants(of: NSPopUpButton.self, in: iosCell).first
+            )
+            let action = try XCTUnwrap(selector.action)
+
+            XCTAssertTrue(
+                NSApp.sendAction(action, to: selector.target, from: selector)
+            )
+
+            XCTAssertEqual(
+                catalog.selectedProject?.selectedLaunchConfiguration?.scheme,
+                "Example-iOS"
+            )
+        }
+    }
+
+    @MainActor
     func testRemovingWorkspaceRefreshesBothTables() async throws {
         try await withCatalog { catalog in
             let controller = ProjectWindowController(
