@@ -68,8 +68,8 @@ final class StatusBarControllerTests: XCTestCase {
                 Array(items.prefix(3)).map(\.title),
                 [
                     "Example",
-                    "Example-macOS — My Mac",
-                    "Example-iOS — iPhone 17 Pro (26.0)",
+                    "Example-macOS",
+                    "Example-iOS",
                 ]
             )
             XCTAssertEqual(
@@ -86,6 +86,147 @@ final class StatusBarControllerTests: XCTestCase {
             )
             XCTAssertEqual(items[1].state, .on)
             XCTAssertEqual(items[2].state, .off)
+        }
+    }
+
+    @MainActor
+    func testConfigurationRowsUseFlexibleSchemeDestinationAndChevronLayout() throws {
+        try withState { catalog, settings in
+            let simulator = XcodeDestination(
+                platform: .iOSSimulator,
+                id: "sim",
+                name: "iPhone 17 Pro",
+                osVersion: "26.0"
+            )
+            configure(
+                catalog,
+                schemes: ["Example-iOS"],
+                destinations: [[simulator]]
+            )
+            let controller = StatusBarController(
+                projectCatalog: catalog,
+                appSettings: settings
+            )
+            let item = controller.contextMenu.items[1]
+            let row = try XCTUnwrap(item.view)
+            let labels = row.subviews.compactMap { $0 as? NSTextField }
+            let schemeLabel = try XCTUnwrap(
+                labels.first { $0.stringValue == "Example-iOS" }
+            )
+            let destinationLabel = try XCTUnwrap(
+                labels.first { $0.stringValue == "iPhone 17 Pro (26.0)" }
+            )
+            let imageViews = row.subviews.compactMap { $0 as? NSImageView }
+            let checkmark = try XCTUnwrap(
+                imageViews.first { $0.identifier?.rawValue == "configuration-checkmark" }
+            )
+            let chevron = try XCTUnwrap(
+                imageViews.first { $0.identifier?.rawValue == "configuration-chevron" }
+            )
+            row.frame.size.width = 360
+            row.layoutSubtreeIfNeeded()
+            let destinationAlignmentRect = destinationLabel.alignmentRect(
+                forFrame: destinationLabel.frame
+            )
+            let chevronAlignmentRect = chevron.alignmentRect(forFrame: chevron.frame)
+
+            XCTAssertNil(item.attributedTitle)
+            XCTAssertEqual(destinationLabel.textColor, .secondaryLabelColor)
+            XCTAssertFalse(checkmark.isHidden)
+            XCTAssertLessThan(schemeLabel.frame.maxX, destinationLabel.frame.minX)
+            XCTAssertEqual(
+                chevronAlignmentRect.minX - destinationAlignmentRect.maxX,
+                8,
+                accuracy: 0.5
+            )
+            XCTAssertEqual(row.frame.maxX - chevron.frame.maxX, 12, accuracy: 0.5)
+            XCTAssertNotNil(item.submenu)
+            XCTAssertEqual(
+                item.accessibilityLabel(),
+                "Example-iOS, iPhone 17 Pro (26.0)"
+            )
+        }
+    }
+
+    @MainActor
+    func testConfigurationRowPreservesSchemeWhenDestinationIsLong() throws {
+        try withState { catalog, settings in
+            let simulator = XcodeDestination(
+                platform: .iOSSimulator,
+                id: "sim",
+                name: "iPhone 17 Pro Max with an exceptionally long destination name",
+                osVersion: "26.0"
+            )
+            configure(
+                catalog,
+                schemes: ["Example-iOS"],
+                destinations: [[simulator]]
+            )
+            let controller = StatusBarController(
+                projectCatalog: catalog,
+                appSettings: settings
+            )
+            let row = try XCTUnwrap(controller.contextMenu.items[1].view)
+            let labels = row.subviews.compactMap { $0 as? NSTextField }
+            let schemeLabel = try XCTUnwrap(
+                labels.first { $0.stringValue == "Example-iOS" }
+            )
+            let destinationLabel = try XCTUnwrap(
+                labels.first { $0.stringValue.hasPrefix("iPhone 17 Pro Max") }
+            )
+            row.frame.size.width = 320
+            row.layoutSubtreeIfNeeded()
+
+            XCTAssertEqual(row.frame.width, 320, accuracy: 0.5)
+            XCTAssertGreaterThanOrEqual(
+                schemeLabel.frame.width,
+                schemeLabel.intrinsicContentSize.width - 0.5
+            )
+            XCTAssertLessThan(
+                destinationLabel.frame.width,
+                destinationLabel.intrinsicContentSize.width
+            )
+        }
+    }
+
+    @MainActor
+    func testConfigurationRowTracksMenuHighlightAppearance() throws {
+        try withState { catalog, settings in
+            let simulator = XcodeDestination(
+                platform: .iOSSimulator,
+                id: "sim",
+                name: "iPhone 17 Pro"
+            )
+            configure(
+                catalog,
+                schemes: ["Example-iOS"],
+                destinations: [[simulator]]
+            )
+            let controller = StatusBarController(
+                projectCatalog: catalog,
+                appSettings: settings
+            )
+            let menu = controller.contextMenu
+            let item = menu.items[1]
+            let row = try XCTUnwrap(item.view)
+            let labels = row.subviews.compactMap { $0 as? NSTextField }
+            let schemeLabel = try XCTUnwrap(
+                labels.first { $0.stringValue == "Example-iOS" }
+            )
+            let destinationLabel = try XCTUnwrap(
+                labels.first { $0.stringValue == "iPhone 17 Pro" }
+            )
+
+            XCTAssertNotNil(menu.delegate)
+            menu.delegate?.menu?(menu, willHighlight: item)
+
+            XCTAssertEqual(schemeLabel.textColor, .selectedMenuItemTextColor)
+            XCTAssertEqual(destinationLabel.textColor, .selectedMenuItemTextColor)
+
+            menu.delegate?.menu?(menu, willHighlight: nil)
+
+            XCTAssertEqual(schemeLabel.textColor, .labelColor)
+            XCTAssertEqual(destinationLabel.textColor, .secondaryLabelColor)
         }
     }
 

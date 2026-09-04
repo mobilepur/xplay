@@ -1,7 +1,124 @@
 import AppKit
 
 @MainActor
-final class StatusBarController: NSObject {
+private final class ConfigurationMenuItemView: NSView {
+    private let schemeLabel: NSTextField
+    private let destinationLabel: NSTextField
+    private let checkmark: NSImageView
+    private let chevron: NSImageView
+    private var isMenuHighlighted = false
+
+    init(scheme: String, destination: String, isSelectedForPlay: Bool) {
+        schemeLabel = NSTextField(labelWithString: scheme)
+        destinationLabel = NSTextField(labelWithString: destination)
+        checkmark = NSImageView()
+        chevron = NSImageView()
+
+        super.init(frame: NSRect(x: 0, y: 0, width: 320, height: 28))
+
+        autoresizingMask = [.width]
+
+        checkmark.identifier = NSUserInterfaceItemIdentifier("configuration-checkmark")
+        checkmark.image = NSImage(
+            systemSymbolName: "checkmark",
+            accessibilityDescription: nil
+        )
+        checkmark.isHidden = !isSelectedForPlay
+        checkmark.translatesAutoresizingMaskIntoConstraints = false
+
+        schemeLabel.font = .menuFont(ofSize: NSFont.systemFontSize)
+        schemeLabel.lineBreakMode = .byTruncatingTail
+        schemeLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        destinationLabel.font = .menuFont(ofSize: NSFont.systemFontSize)
+        destinationLabel.alignment = .right
+        destinationLabel.lineBreakMode = .byTruncatingMiddle
+        destinationLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        destinationLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        chevron.identifier = NSUserInterfaceItemIdentifier("configuration-chevron")
+        chevron.image = NSImage(
+            systemSymbolName: "chevron.right",
+            accessibilityDescription: nil
+        )
+        chevron.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(checkmark)
+        addSubview(schemeLabel)
+        addSubview(destinationLabel)
+        addSubview(chevron)
+
+        NSLayoutConstraint.activate([
+            checkmark.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            checkmark.centerYAnchor.constraint(equalTo: centerYAnchor),
+            checkmark.widthAnchor.constraint(equalToConstant: 12),
+            checkmark.heightAnchor.constraint(equalToConstant: 12),
+            schemeLabel.leadingAnchor.constraint(equalTo: checkmark.trailingAnchor, constant: 8),
+            schemeLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            destinationLabel.leadingAnchor.constraint(
+                greaterThanOrEqualTo: schemeLabel.trailingAnchor,
+                constant: 12
+            ),
+            destinationLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            destinationLabel.trailingAnchor.constraint(equalTo: chevron.leadingAnchor, constant: -8),
+            chevron.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            chevron.centerYAnchor.constraint(equalTo: centerYAnchor),
+            chevron.widthAnchor.constraint(equalToConstant: 8),
+            chevron.heightAnchor.constraint(equalToConstant: 12),
+        ])
+
+        updateAppearance()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard isMenuHighlighted else {
+            return
+        }
+
+        NSColor.selectedContentBackgroundColor.setFill()
+        NSBezierPath(
+            roundedRect: bounds.insetBy(dx: 5, dy: 1),
+            xRadius: 5,
+            yRadius: 5
+        ).fill()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateAppearance()
+    }
+
+    func setMenuHighlighted(_ highlighted: Bool) {
+        guard isMenuHighlighted != highlighted else {
+            return
+        }
+        isMenuHighlighted = highlighted
+        updateAppearance()
+        needsDisplay = true
+    }
+
+    private func updateAppearance() {
+        let primaryColor: NSColor = isMenuHighlighted
+            ? .selectedMenuItemTextColor
+            : .labelColor
+        let secondaryColor: NSColor = isMenuHighlighted
+            ? .selectedMenuItemTextColor
+            : .secondaryLabelColor
+        schemeLabel.textColor = primaryColor
+        destinationLabel.textColor = secondaryColor
+        checkmark.contentTintColor = primaryColor
+        chevron.contentTintColor = secondaryColor
+    }
+}
+
+@MainActor
+final class StatusBarController: NSObject, NSMenuDelegate {
     static let macroWarningText = "Accept Macros skips Xcode validation for all current and future macros in every XPlay project."
 
     enum Interaction: Equatable {
@@ -32,6 +149,7 @@ final class StatusBarController: NSObject {
     private func makeContextMenu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
+        menu.delegate = self
 
         let projectItem = NSMenuItem(
             title: projectCatalog?.selectedProject?.name ?? "No project selected",
@@ -102,6 +220,15 @@ final class StatusBarController: NSObject {
         return menu
     }
 
+    func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) {
+        for menuItem in menu.items {
+            guard let row = menuItem.view as? ConfigurationMenuItemView else {
+                continue
+            }
+            row.setMenuHighlighted(menuItem === item)
+        }
+    }
+
     private func makeConfigurationItem(
         _ configuration: LaunchConfiguration,
         projectURL: URL,
@@ -116,9 +243,15 @@ final class StatusBarController: NSObject {
             destinationTitle = "Choose Destination…"
         }
         let item = NSMenuItem(
-            title: "\(configuration.scheme) — \(destinationTitle)",
+            title: configuration.scheme,
             action: nil,
             keyEquivalent: ""
+        )
+        item.setAccessibilityLabel("\(configuration.scheme), \(destinationTitle)")
+        item.view = makeConfigurationRow(
+            scheme: configuration.scheme,
+            destination: destinationTitle,
+            isSelectedForPlay: isSelectedForPlay
         )
         item.state = isSelectedForPlay ? .on : .off
         let submenu = NSMenu(title: configuration.scheme)
@@ -181,6 +314,18 @@ final class StatusBarController: NSObject {
         }
         item.submenu = submenu
         return item
+    }
+
+    private func makeConfigurationRow(
+        scheme: String,
+        destination: String,
+        isSelectedForPlay: Bool
+    ) -> NSView {
+        ConfigurationMenuItemView(
+            scheme: scheme,
+            destination: destination,
+            isSelectedForPlay: isSelectedForPlay
+        )
     }
 
     private func makeProjectsHeaderItem() -> NSMenuItem {
