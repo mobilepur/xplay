@@ -3,12 +3,18 @@
 XPlay is a macOS menu bar app for building and launching Xcode projects without
 keeping Xcode open.
 
-This initial prototype displays a Play icon in the menu bar and replaces it with
-an animated spinner while a project is building. Right-clicking the icon opens a
-native menu with the current project state, saved projects, and an option to quit
-XPlay. The project editor can add `.xcodeproj` bundles through Finder, remove saved
-projects, and remembers the current selection. Scheme configuration will be added
-next, so left-clicking the Play icon currently has no effect.
+XPlay displays a Play icon in the menu bar and replaces it with an animated spinner
+while configurations are running. The project editor adds an `.xcworkspace`, discovers
+its schemes, and lets the developer enable multiple schemes with a separate destination
+for each one. The initial destination support covers the current Mac and installed iOS
+Simulators; physical iOS devices are intentionally excluded.
+
+Right-clicking the icon shows the enabled schemes and their selected destinations,
+saved XPlay Projects, and global settings. **Accept Macros** is global, defaults to off,
+and requires confirmation before XPlay adds `-skipMacroValidation` to builds. A left
+click builds and launches every enabled configuration sequentially. Failures do not
+prevent later configurations from running, and every configuration has its own build
+log. Existing `.xcodeproj` records remain readable for migration.
 
 ## Requirements
 

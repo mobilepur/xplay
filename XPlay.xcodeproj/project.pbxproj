@@ -10,13 +10,18 @@
 		06F2142A97B9A4CF4BF4DC22 /* ProjectWindowControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 032E811A0BB38BEA0C7037D5 /* ProjectWindowControllerTests.swift */; };
 		12C3305174FED64AC9FCA365 /* XcodeProjectLaunchPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99A36F70A24E2A6B0C95D9B3 /* XcodeProjectLaunchPlan.swift */; };
 		12EEC989E2D4952C533CBE2D /* XPlayApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBC3158E7140F16D9947921D /* XPlayApp.swift */; };
+		355105C4E7DDE5FB32EE196E /* AppSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 890034C894A39D7E72CCB89D /* AppSettingsTests.swift */; };
 		3E6D6F3FC34DAB0150EA36DB /* StatusBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F448FE2168DEBB85BD5F9471 /* StatusBarController.swift */; };
+		41F3FF50FB6BB93711B70E67 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3C3BB4A4F5038A7519D58C3 /* AppSettings.swift */; };
 		50EE1E5F942E9282F3DD01E8 /* ProjectCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2E7CE6C6F9C69A1C599247E /* ProjectCatalogTests.swift */; };
 		69FEAFAC8AB778F45F6D6665 /* ProjectWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C934D8CB6799EAFC613A70F6 /* ProjectWindowController.swift */; };
+		8148AC0CDF7848500B00016B /* XcodeSchemeResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59B211DDF960805DB42DF190 /* XcodeSchemeResolver.swift */; };
 		931DC3D906167923D1E16126 /* XcodeProjectLaunchPlanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 292743F064E984E74A232BBD /* XcodeProjectLaunchPlanTests.swift */; };
 		B2B17F76E05F444906BBC1EA /* ProjectCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43644CEC06DE309FD951FBA5 /* ProjectCatalog.swift */; };
+		B37C7DCAD5F9A0B99FA4EC2B /* XcodeSchemeResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30CAABC44D0B67863648BB2F /* XcodeSchemeResolverTests.swift */; };
 		BB1245326FBD2D4E230BDD11 /* XcodeProjectLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC69C186693180A3D8E01C5D /* XcodeProjectLauncher.swift */; };
 		D1D3FEB4B093FFE7A54DA17A /* StatusBarControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 131FEE22EB09A9463AE7ADED /* StatusBarControllerTests.swift */; };
+		E14774DB3D825EA2A16BFBDE /* XcodeProjectLauncherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FA0BDD8F504A0214E26D4F2 /* XcodeProjectLauncherTests.swift */; };
 		E15E1595BB0A43342BE130B6 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D0EEBA2BC9E2B8F992A9CA8 /* AppDelegate.swift */; };
 /* End PBXBuildFile section */
 
@@ -34,14 +39,19 @@
 		032E811A0BB38BEA0C7037D5 /* ProjectWindowControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectWindowControllerTests.swift; sourceTree = "<group>"; };
 		0D0EEBA2BC9E2B8F992A9CA8 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		131FEE22EB09A9463AE7ADED /* StatusBarControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarControllerTests.swift; sourceTree = "<group>"; };
+		1FA0BDD8F504A0214E26D4F2 /* XcodeProjectLauncherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XcodeProjectLauncherTests.swift; sourceTree = "<group>"; };
 		292743F064E984E74A232BBD /* XcodeProjectLaunchPlanTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XcodeProjectLaunchPlanTests.swift; sourceTree = "<group>"; };
+		30CAABC44D0B67863648BB2F /* XcodeSchemeResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XcodeSchemeResolverTests.swift; sourceTree = "<group>"; };
 		43644CEC06DE309FD951FBA5 /* ProjectCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectCatalog.swift; sourceTree = "<group>"; };
+		59B211DDF960805DB42DF190 /* XcodeSchemeResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XcodeSchemeResolver.swift; sourceTree = "<group>"; };
 		5CF71FA59D5E445078C7CD25 /* XPlay.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = XPlay.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		890034C894A39D7E72CCB89D /* AppSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettingsTests.swift; sourceTree = "<group>"; };
 		99A36F70A24E2A6B0C95D9B3 /* XcodeProjectLaunchPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XcodeProjectLaunchPlan.swift; sourceTree = "<group>"; };
 		A2E7CE6C6F9C69A1C599247E /* ProjectCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectCatalogTests.swift; sourceTree = "<group>"; };
 		AC69C186693180A3D8E01C5D /* XcodeProjectLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XcodeProjectLauncher.swift; sourceTree = "<group>"; };
 		B71933D2376D6C6552A48654 /* XPlayTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = XPlayTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C934D8CB6799EAFC613A70F6 /* ProjectWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectWindowController.swift; sourceTree = "<group>"; };
+		F3C3BB4A4F5038A7519D58C3 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		F448FE2168DEBB85BD5F9471 /* StatusBarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarController.swift; sourceTree = "<group>"; };
 		FBC3158E7140F16D9947921D /* XPlayApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XPlayApp.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -50,10 +60,13 @@
 		3181189A243822D008774DD6 /* XPlayTests */ = {
 			isa = PBXGroup;
 			children = (
+				890034C894A39D7E72CCB89D /* AppSettingsTests.swift */,
 				A2E7CE6C6F9C69A1C599247E /* ProjectCatalogTests.swift */,
 				032E811A0BB38BEA0C7037D5 /* ProjectWindowControllerTests.swift */,
 				131FEE22EB09A9463AE7ADED /* StatusBarControllerTests.swift */,
+				1FA0BDD8F504A0214E26D4F2 /* XcodeProjectLauncherTests.swift */,
 				292743F064E984E74A232BBD /* XcodeProjectLaunchPlanTests.swift */,
+				30CAABC44D0B67863648BB2F /* XcodeSchemeResolverTests.swift */,
 			);
 			path = XPlayTests;
 			sourceTree = "<group>";
@@ -80,11 +93,13 @@
 			isa = PBXGroup;
 			children = (
 				0D0EEBA2BC9E2B8F992A9CA8 /* AppDelegate.swift */,
+				F3C3BB4A4F5038A7519D58C3 /* AppSettings.swift */,
 				43644CEC06DE309FD951FBA5 /* ProjectCatalog.swift */,
 				C934D8CB6799EAFC613A70F6 /* ProjectWindowController.swift */,
 				F448FE2168DEBB85BD5F9471 /* StatusBarController.swift */,
 				AC69C186693180A3D8E01C5D /* XcodeProjectLauncher.swift */,
 				99A36F70A24E2A6B0C95D9B3 /* XcodeProjectLaunchPlan.swift */,
+				59B211DDF960805DB42DF190 /* XcodeSchemeResolver.swift */,
 				FBC3158E7140F16D9947921D /* XPlayApp.swift */,
 			);
 			path = XPlay;
@@ -165,12 +180,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				E15E1595BB0A43342BE130B6 /* AppDelegate.swift in Sources */,
+				41F3FF50FB6BB93711B70E67 /* AppSettings.swift in Sources */,
 				B2B17F76E05F444906BBC1EA /* ProjectCatalog.swift in Sources */,
 				69FEAFAC8AB778F45F6D6665 /* ProjectWindowController.swift in Sources */,
 				3E6D6F3FC34DAB0150EA36DB /* StatusBarController.swift in Sources */,
 				12EEC989E2D4952C533CBE2D /* XPlayApp.swift in Sources */,
 				12C3305174FED64AC9FCA365 /* XcodeProjectLaunchPlan.swift in Sources */,
 				BB1245326FBD2D4E230BDD11 /* XcodeProjectLauncher.swift in Sources */,
+				8148AC0CDF7848500B00016B /* XcodeSchemeResolver.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -178,10 +195,13 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				355105C4E7DDE5FB32EE196E /* AppSettingsTests.swift in Sources */,
 				50EE1E5F942E9282F3DD01E8 /* ProjectCatalogTests.swift in Sources */,
 				06F2142A97B9A4CF4BF4DC22 /* ProjectWindowControllerTests.swift in Sources */,
 				D1D3FEB4B093FFE7A54DA17A /* StatusBarControllerTests.swift in Sources */,
 				931DC3D906167923D1E16126 /* XcodeProjectLaunchPlanTests.swift in Sources */,
+				E14774DB3D825EA2A16BFBDE /* XcodeProjectLauncherTests.swift in Sources */,
+				B37C7DCAD5F9A0B99FA4EC2B /* XcodeSchemeResolverTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

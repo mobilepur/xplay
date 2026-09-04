@@ -3,14 +3,24 @@ import AppKit
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var projectCatalog = ProjectCatalog()
-    private lazy var projectWindowController = ProjectWindowController(catalog: projectCatalog)
+    private lazy var appSettings = AppSettings()
+    private lazy var projectWindowController = ProjectWindowController(
+        catalog: projectCatalog,
+        onCatalogChange: { [weak self] in
+            self?.statusBarController?.refreshConfiguration()
+        }
+    )
     private var statusBarController: StatusBarController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusBarController = StatusBarController(
             projectCatalog: projectCatalog,
+            appSettings: appSettings,
             onEditProjects: { [weak self] in
                 self?.projectWindowController.showProjects()
+            },
+            onCatalogChange: { [weak self] in
+                self?.projectWindowController.refreshFromCatalog()
             }
         )
     }
