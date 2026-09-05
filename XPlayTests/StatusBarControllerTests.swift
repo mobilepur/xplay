@@ -126,37 +126,133 @@ final class StatusBarControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testLargePlayButtonLaunchesSelectionAndDisablesDuringLaunch() throws {
+    func testRunAndStopButtonsLaunchAndCancelSelection() throws {
         try withState { catalog, settings in
             var plans: [XcodeProjectLaunchPlan] = []
+            let launcher = DeferredProjectLauncher()
             let controller = StatusBarController(projectCatalog: catalog, appSettings: settings,
                 makeLauncher: { plan in
                     plans.append(plan)
-                    return DeferredProjectLauncher()
+                    return launcher
                 })
             let item = try XCTUnwrap(controller.contextMenu.items.first { $0.title == "Run Project" })
             let row = try XCTUnwrap(item.view)
-            let play = try XCTUnwrap(row.subviews.compactMap { $0 as? NSButton }.first)
+            let buttons = descendants(of: row).compactMap { $0 as? NSButton }
+            let play = try XCTUnwrap(buttons.first { $0.title == "Run Project" })
+            let stop = try XCTUnwrap(buttons.first {
+                $0.identifier?.rawValue == "stop-project-button"
+            })
+            let spinner = try XCTUnwrap(
+                descendants(of: play).compactMap { $0 as? NSProgressIndicator }.first {
+                    $0.identifier?.rawValue == "run-project-spinner"
+                }
+            )
+            row.frame.size.width = 320
+            row.layoutSubtreeIfNeeded()
             XCTAssertGreaterThanOrEqual(row.frame.height, 48)
+            XCTAssertLessThan(play.frame.maxX, stop.frame.minX)
+            XCTAssertGreaterThanOrEqual(play.frame.width, play.intrinsicContentSize.width)
+            XCTAssertEqual(stop.frame.width, 44, accuracy: 0.5)
             XCTAssertEqual(play.title, "Run Project")
+            XCTAssertEqual(play.font, .systemFont(ofSize: 16, weight: .medium))
             XCTAssertEqual(play.image?.name(), NSImage.Name("XPlayIcon"))
             XCTAssertEqual(play.image?.size, NSSize(width: 21, height: 18))
             XCTAssertTrue(play.image?.isTemplate == true)
+            XCTAssertEqual(stop.title, "")
+            XCTAssertEqual(stop.imagePosition, .imageOnly)
+            XCTAssertEqual(stop.accessibilityLabel(), "Stop")
+            XCTAssertTrue(spinner.isHidden)
             XCTAssertFalse(play.isEnabled)
+            XCTAssertFalse(stop.isEnabled)
             XCTAssertFalse(item.isEnabled)
             let mac = XcodeDestination(platform: .macOS, id: "mac", name: "My Mac")
             configure(catalog, schemes: ["Example-macOS"], destinations: [[mac]])
             controller.refreshConfiguration()
             XCTAssertTrue(play.isEnabled)
+            XCTAssertFalse(stop.isEnabled)
             XCTAssertTrue(item.isEnabled)
             play.performClick(nil)
             XCTAssertEqual(plans.map(\.scheme), ["Example-macOS"])
             XCTAssertFalse(play.isEnabled)
-            XCTAssertFalse(item.isEnabled)
-            XCTAssertEqual(play.title, "Starting…")
-            play.performClick(nil)
+            XCTAssertTrue(stop.isEnabled)
+            XCTAssertTrue(item.isEnabled)
+            XCTAssertEqual(play.title, "Run Project")
+            XCTAssertFalse(spinner.isHidden)
+            stop.performClick(nil)
             XCTAssertEqual(plans.count, 1)
+            XCTAssertEqual(launcher.cancelCount, 1)
+            XCTAssertTrue(play.isEnabled)
+            XCTAssertFalse(stop.isEnabled)
+            XCTAssertTrue(spinner.isHidden)
         }
+    }
+
+    @MainActor
+    func testPlayInteractionStopsAnActiveLaunchOnSecondClick() {
+        withState { catalog, settings in
+            let mac = XcodeDestination(platform: .macOS, id: "mac", name: "My Mac")
+            configure(catalog, schemes: ["Example-macOS"], destinations: [[mac]])
+            let launcher = DeferredProjectLauncher()
+            let controller = StatusBarController(
+                projectCatalog: catalog,
+                appSettings: settings,
+                makeLauncher: { _ in launcher }
+            )
+
+            controller.perform(.startProject)
+            controller.perform(.startProject)
+
+            XCTAssertEqual(launcher.cancelCount, 1)
+            XCTAssertEqual(controller.statusItem.button?.accessibilityLabel(), "Start project")
+        }
+    }
+
+    @MainActor
+    func testCancelledLaunchCompletionCannotReplaceANewerLaunch() async throws {
+        let suiteName = "StatusBarControllerTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let catalog = ProjectCatalog(defaults: defaults, storageKey: "projects")
+        let settings = AppSettings(defaults: defaults, storageKey: "settings")
+        let mac = XcodeDestination(platform: .macOS, id: "mac", name: "My Mac")
+        configure(catalog, schemes: ["Example-macOS"], destinations: [[mac]])
+        let firstLauncher = DeferredProjectLauncher()
+        let secondLauncher = DeferredProjectLauncher()
+        var launchers: [DeferredProjectLauncher] = [firstLauncher, secondLauncher]
+        var presentedFailureCount = 0
+        let controller = StatusBarController(
+            projectCatalog: catalog,
+            appSettings: settings,
+            makeLauncher: { _ in launchers.removeFirst() },
+            presentLaunchFailures: { presentedFailureCount += $0.count }
+        )
+        let row = try XCTUnwrap(
+            controller.contextMenu.items.first { $0.title == "Run Project" }?.view
+        )
+        let stop = try XCTUnwrap(
+            descendants(of: row).compactMap { $0 as? NSButton }.first {
+                $0.identifier?.rawValue == "stop-project-button"
+            }
+        )
+
+        controller.perform(.startProject)
+        controller.perform(.startProject)
+        controller.perform(.startProject)
+        firstLauncher.complete(.failure(TestLaunchError.failed))
+        await Task.yield()
+        await Task.yield()
+
+        XCTAssertTrue(stop.isEnabled)
+        XCTAssertEqual(presentedFailureCount, 0)
+        XCTAssertEqual(secondLauncher.cancelCount, 0)
+
+        secondLauncher.complete(.success(secondLauncher.logURL))
+        let finished = expectation(
+            for: NSPredicate { _, _ in !stop.isEnabled },
+            evaluatedWith: nil
+        )
+        await fulfillment(of: [finished], timeout: 2)
+        XCTAssertEqual(presentedFailureCount, 0)
     }
 
     @MainActor
@@ -314,7 +410,7 @@ final class StatusBarControllerTests: XCTestCase {
 
     @MainActor
     func testSelectedProjectListsEnabledSchemesAndDestinations() throws {
-        withState { catalog, settings in
+        try withState { catalog, settings in
             let mac = XcodeDestination(platform: .macOS, id: "mac", name: "My Mac")
             let simulator = XcodeDestination(
                 platform: .iOSSimulator,
@@ -343,17 +439,28 @@ final class StatusBarControllerTests: XCTestCase {
                 ]
             )
             XCTAssertEqual(
-                items[1].submenu?.items.map(\.title),
-                ["Use for Play", "", "My Mac"]
+                descendants(of: try XCTUnwrap(items[1].view))
+                    .compactMap { $0 as? NSButton }
+                    .first { $0.identifier?.rawValue == "destination-menu-button" }?
+                    .menu?.items.map(\.title),
+                ["My Mac"]
             )
             XCTAssertEqual(
-                items[2].submenu?.items.map(\.title),
-                ["Use for Play", "", "iPhone 17 Pro (26.0)"]
+                descendants(of: try XCTUnwrap(items[2].view))
+                    .compactMap { $0 as? NSButton }
+                    .first { $0.identifier?.rawValue == "destination-menu-button" }?
+                    .menu?.items.map(\.title),
+                ["iPhone 17 Pro (26.0)"]
             )
             XCTAssertEqual(
-                items[1].submenu?.items.first { $0.title == "My Mac" }?.state,
+                descendants(of: try XCTUnwrap(items[1].view))
+                    .compactMap { $0 as? NSButton }
+                    .first { $0.identifier?.rawValue == "destination-menu-button" }?
+                    .menu?.items.first { $0.title == "My Mac" }?.state,
                 .on
             )
+            XCTAssertNil(items[1].submenu)
+            XCTAssertNil(items[2].submenu)
             XCTAssertEqual(items[1].state, .on)
             XCTAssertEqual(items[2].state, .off)
         }
@@ -410,7 +517,24 @@ final class StatusBarControllerTests: XCTestCase {
                 accuracy: 0.5
             )
             XCTAssertEqual(row.frame.maxX - chevron.frame.maxX, 12, accuracy: 0.5)
-            XCTAssertNotNil(item.submenu)
+            let buttons = descendants(of: row).compactMap { $0 as? NSButton }
+            let schemeButton = try XCTUnwrap(buttons.first {
+                $0.identifier?.rawValue == "scheme-selection-button"
+            })
+            let destinationButton = try XCTUnwrap(buttons.first {
+                $0.identifier?.rawValue == "destination-menu-button"
+            })
+            XCTAssertEqual(schemeButton.frame.maxX, destinationButton.frame.minX, accuracy: 0.5)
+            XCTAssertTrue(schemeButton.frame.contains(
+                NSPoint(x: schemeLabel.frame.midX, y: schemeLabel.frame.midY)
+            ))
+            XCTAssertTrue(destinationButton.frame.contains(
+                NSPoint(x: destinationLabel.frame.midX, y: destinationLabel.frame.midY)
+            ))
+            XCTAssertTrue(destinationButton.frame.contains(
+                NSPoint(x: chevron.frame.midX, y: chevron.frame.midY)
+            ))
+            XCTAssertNil(item.submenu)
             XCTAssertEqual(
                 item.accessibilityLabel(),
                 "Example-iOS, iPhone 17 Pro (26.0)"
@@ -514,24 +638,31 @@ final class StatusBarControllerTests: XCTestCase {
                 schemes: ["Example-macOS", "Example-iOS"],
                 destinations: [[mac], [simulator]]
             )
+            var presentedDeviceMenuCount = 0
             let controller = StatusBarController(
                 projectCatalog: catalog,
-                appSettings: settings
+                appSettings: settings,
+                presentDestinationMenu: { _, _ in
+                    presentedDeviceMenuCount += 1
+                }
             )
             let iosItem = try XCTUnwrap(
                 controller.contextMenu.items.first { $0.title.hasPrefix("Example-iOS") }
             )
-            let useForPlayItem = try XCTUnwrap(
-                iosItem.submenu?.items.first { $0.title == "Use for Play" }
+            let row = try XCTUnwrap(iosItem.view)
+            let schemeButton = try XCTUnwrap(
+                descendants(of: row).compactMap { $0 as? NSButton }.first {
+                    $0.identifier?.rawValue == "scheme-selection-button"
+                }
             )
-            let submenu = try XCTUnwrap(useForPlayItem.menu)
 
-            submenu.performActionForItem(at: submenu.index(of: useForPlayItem))
+            schemeButton.performClick(nil)
 
             XCTAssertEqual(
                 catalog.selectedProject?.selectedLaunchConfiguration?.scheme,
                 "Example-iOS"
             )
+            XCTAssertEqual(presentedDeviceMenuCount, 0)
             let refreshedSchemes = controller.contextMenu.items.filter {
                 $0.title.hasPrefix("Example-")
             }
@@ -540,7 +671,7 @@ final class StatusBarControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testSelectingDestinationFromSchemeSubmenuPersistsSelection() throws {
+    func testSelectingDestinationFromRightSideMenuPersistsSelection() throws {
         try withState { catalog, settings in
             let first = XcodeDestination(
                 platform: .iOSSimulator,
@@ -553,14 +684,27 @@ final class StatusBarControllerTests: XCTestCase {
                 name: "iPhone 17 Pro"
             )
             configure(catalog, schemes: ["Example-iOS"], destinations: [[first, second]])
+            var presentedMenu: NSMenu?
             let controller = StatusBarController(
                 projectCatalog: catalog,
-                appSettings: settings
+                appSettings: settings,
+                presentDestinationMenu: { menu, _ in
+                    presentedMenu = menu
+                }
             )
             let schemeItem = try XCTUnwrap(
                 controller.contextMenu.items.first { $0.title.hasPrefix("Example-iOS") }
             )
-            let submenu = try XCTUnwrap(schemeItem.submenu)
+            let row = try XCTUnwrap(schemeItem.view)
+            let destinationButton = try XCTUnwrap(
+                descendants(of: row).compactMap { $0 as? NSButton }.first {
+                    $0.identifier?.rawValue == "destination-menu-button"
+                }
+            )
+
+            destinationButton.performClick(nil)
+
+            let submenu = try XCTUnwrap(presentedMenu)
             let secondDestination = try XCTUnwrap(
                 submenu.items.first { $0.title == "iPhone 17 Pro" }
             )
@@ -893,7 +1037,11 @@ final class StatusBarControllerTests: XCTestCase {
         })
         let dots = try XCTUnwrap(views.first { $0.identifier?.rawValue == "running-dots" })
         let playRow = try XCTUnwrap(controller.contextMenu.items.first { $0.title == "Run Project" }?.view)
-        let play = try XCTUnwrap(playRow.subviews.compactMap { $0 as? NSButton }.first)
+        let play = try XCTUnwrap(
+            descendants(of: playRow).compactMap { $0 as? NSButton }.first {
+                $0.title == "Run Project"
+            }
+        )
 
         for shouldFail in [false, true] {
             catalog.selectDestination(id: phone.id, scheme: "Example", forProjectAt: 0)
@@ -1038,11 +1186,14 @@ private final class RecordingProjectLauncher: ProjectLaunching, @unchecked Senda
     func launch(completion: @escaping @Sendable (Result<URL, Error>) -> Void) {
         completion(result)
     }
+
+    func cancel() {}
 }
 
 private final class DeferredProjectLauncher: ProjectLaunching, @unchecked Sendable {
     let logURL = URL(fileURLWithPath: "/tmp/deferred-build.log")
     private var completion: (@Sendable (Result<URL, Error>) -> Void)?
+    private(set) var cancelCount = 0
 
     func launch(completion: @escaping @Sendable (Result<URL, Error>) -> Void) {
         self.completion = completion
@@ -1051,5 +1202,9 @@ private final class DeferredProjectLauncher: ProjectLaunching, @unchecked Sendab
     func complete(_ result: Result<URL, Error>) {
         completion?(result)
         completion = nil
+    }
+
+    func cancel() {
+        cancelCount += 1
     }
 }

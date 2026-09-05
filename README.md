@@ -29,8 +29,8 @@ changing either click swaps the other, so one runs the project and the other ope
 the menu. The Run Project button uses the XPlay icon. The **About** section links the displayed
 version to its GitHub release notes and opens the GitHub issue reporter for problems.
 
-The project editor shows `.xcworkspace` files in a full-height sidebar. Selecting a
-workspace drills into its launch configurations beside it, where the developer can
+The project editor accepts `.xcodeproj` and `.xcworkspace` containers and shows them
+in a full-height sidebar. Selecting a project drills into its launch configurations, where the developer can
 enable schemes and choose a separate destination for each one. The
 initial destination support covers the current Mac and installed iOS Simulators;
 physical iOS devices are intentionally excluded. One enabled scheme is selected for
@@ -39,8 +39,7 @@ menu makes it active.
 
 **Accept Macros** is global, defaults to off, and requires confirmation before XPlay
 adds `-skipMacroValidation` to builds.
-Every configuration has its own build log. Existing `.xcodeproj` records remain readable
-for migration.
+Every configuration has its own build log.
 
 ## Requirements
 

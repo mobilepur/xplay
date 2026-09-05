@@ -3,6 +3,119 @@ import XCTest
 @testable import XPlay
 
 final class XcodeProjectLauncherTests: XCTestCase {
+    func testCancelInterruptsActiveBuildAndDoesNotOpenApplication() throws {
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("XcodeProjectLauncherTests.\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+        let workspaceURL = temporaryDirectory.appendingPathComponent("Workspace.xcworkspace")
+        try FileManager.default.createDirectory(
+            at: workspaceURL,
+            withIntermediateDirectories: true
+        )
+        let plan = XcodeProjectLaunchPlan(
+            containerURL: workspaceURL,
+            containerKind: .workspace,
+            scheme: "Desktop",
+            destination: XcodeDestination(platform: .macOS, id: "mac", name: "My Mac"),
+            derivedDataURL: temporaryDirectory.appendingPathComponent("DerivedData"),
+            logURL: temporaryDirectory.appendingPathComponent("Logs/build.log"),
+            productName: "Workspace"
+        )
+        let commandStarted = expectation(description: "build command started")
+        let commandCancelled = DispatchSemaphore(value: 0)
+        let openedApplication = URLBox()
+        let launcher = XcodeProjectLauncher(
+            plan: plan,
+            runCommand: { _, _, _, _ in
+                commandStarted.fulfill()
+                commandCancelled.wait()
+                return 0
+            },
+            cancelCommand: {
+                commandCancelled.signal()
+            },
+            openMacApplication: { applicationURL, completion in
+                openedApplication.set(applicationURL)
+                completion(nil)
+            },
+            resolveBuiltProduct: { _ in
+                XCTFail("A cancelled build must not resolve or open its product")
+                return plan.builtAppURL
+            }
+        )
+        let finished = expectation(description: "cancelled launch finished")
+        let launchResult = LaunchResultBox()
+
+        launcher.launch { result in
+            launchResult.set(result)
+            finished.fulfill()
+        }
+        wait(for: [commandStarted], timeout: 2)
+        launcher.cancel()
+        wait(for: [finished], timeout: 2)
+
+        XCTAssertThrowsError(try launchResult.value?.get()) { error in
+            XCTAssertTrue(error is CancellationError)
+        }
+        XCTAssertNil(openedApplication.value)
+    }
+
+    func testCancelInterruptsProductResolutionCommand() throws {
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("XcodeProjectLauncherTests.\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+        let workspaceURL = temporaryDirectory.appendingPathComponent("Workspace.xcworkspace")
+        try FileManager.default.createDirectory(
+            at: workspaceURL,
+            withIntermediateDirectories: true
+        )
+        let plan = XcodeProjectLaunchPlan(
+            containerURL: workspaceURL,
+            containerKind: .workspace,
+            scheme: "Desktop",
+            destination: XcodeDestination(platform: .macOS, id: "mac", name: "My Mac"),
+            derivedDataURL: temporaryDirectory.appendingPathComponent("DerivedData"),
+            logURL: temporaryDirectory.appendingPathComponent("Logs/build.log"),
+            productName: "Workspace"
+        )
+        let resolutionStarted = expectation(description: "product resolution started")
+        let commandCancelled = DispatchSemaphore(value: 0)
+        let openedApplication = URLBox()
+        let launcher = XcodeProjectLauncher(
+            plan: plan,
+            runCommand: { _, _, _, _ in 0 },
+            runCapturedCommand: { executableURL, arguments in
+                XCTAssertEqual(executableURL.path, "/usr/bin/xcodebuild")
+                XCTAssertEqual(arguments, plan.buildSettingsArguments)
+                resolutionStarted.fulfill()
+                commandCancelled.wait()
+                throw CancellationError()
+            },
+            cancelCommand: {
+                commandCancelled.signal()
+            },
+            openMacApplication: { applicationURL, completion in
+                openedApplication.set(applicationURL)
+                completion(nil)
+            }
+        )
+        let finished = expectation(description: "cancelled resolution finished")
+        let launchResult = LaunchResultBox()
+
+        launcher.launch { result in
+            launchResult.set(result)
+            finished.fulfill()
+        }
+        wait(for: [resolutionStarted], timeout: 2)
+        launcher.cancel()
+        wait(for: [finished], timeout: 2)
+
+        XCTAssertThrowsError(try launchResult.value?.get()) { error in
+            XCTAssertTrue(error is CancellationError)
+        }
+        XCTAssertNil(openedApplication.value)
+    }
+
     func testMacLaunchUsesResolvedProductWhenAppNameDiffersFromWorkspace() throws {
         let temporaryDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("XcodeProjectLauncherTests.\(UUID().uuidString)")

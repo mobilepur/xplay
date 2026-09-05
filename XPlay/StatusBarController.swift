@@ -1,6 +1,11 @@
 import AppKit
 
 @MainActor
+private final class ConfigurationActionButton: NSButton {
+    var representedSelection: [String: String]?
+}
+
+@MainActor
 private final class MenuDetailItemView: NSView {
     private let titleLabel: NSTextField
     private let detailLabel: NSTextField
@@ -120,6 +125,57 @@ private final class MenuDetailItemView: NSView {
         isMenuHighlighted = highlighted
         updateAppearance()
         needsDisplay = true
+    }
+
+    func addConfigurationActions(
+        target: AnyObject,
+        selection: [String: String],
+        destinationMenu: NSMenu,
+        selectSchemeAction: Selector,
+        showDestinationMenuAction: Selector
+    ) {
+        let schemeButton = ConfigurationActionButton(
+            title: "",
+            target: target,
+            action: selectSchemeAction
+        )
+        schemeButton.identifier = NSUserInterfaceItemIdentifier("scheme-selection-button")
+        schemeButton.representedSelection = selection
+        schemeButton.isBordered = false
+        schemeButton.isTransparent = true
+        schemeButton.focusRingType = .none
+        schemeButton.toolTip = "Use \(titleLabel.stringValue) for Play"
+        schemeButton.setAccessibilityLabel("Use \(titleLabel.stringValue) for Play")
+        schemeButton.translatesAutoresizingMaskIntoConstraints = false
+
+        let destinationButton = NSButton(
+            title: "",
+            target: target,
+            action: showDestinationMenuAction
+        )
+        destinationButton.identifier = NSUserInterfaceItemIdentifier("destination-menu-button")
+        destinationButton.menu = destinationMenu
+        destinationButton.isBordered = false
+        destinationButton.isTransparent = true
+        destinationButton.focusRingType = .none
+        destinationButton.toolTip = "Choose device for \(titleLabel.stringValue)"
+        destinationButton.setAccessibilityLabel(
+            "Choose device for \(titleLabel.stringValue), \(detailLabel.stringValue)"
+        )
+        destinationButton.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(schemeButton)
+        addSubview(destinationButton)
+        NSLayoutConstraint.activate([
+            schemeButton.leadingAnchor.constraint(equalTo: leadingAnchor),
+            schemeButton.trailingAnchor.constraint(equalTo: detailLabel.leadingAnchor),
+            schemeButton.topAnchor.constraint(equalTo: topAnchor),
+            schemeButton.bottomAnchor.constraint(equalTo: bottomAnchor),
+            destinationButton.leadingAnchor.constraint(equalTo: detailLabel.leadingAnchor),
+            destinationButton.trailingAnchor.constraint(equalTo: trailingAnchor),
+            destinationButton.topAnchor.constraint(equalTo: topAnchor),
+            destinationButton.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
     }
 
     private func updateAppearance() {
@@ -331,11 +387,15 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private let presentLaunchFailures: ([LaunchFailure]) -> Void
     private let appVersion: String?
     private let openExternalURL: (URL) -> Void
+    private let presentDestinationMenu: (NSMenu, NSPoint) -> Void
     private var activeLauncher: (any ProjectLaunching)?
+    private var activeLaunchID: UUID?
     private var isRunning = false
     private var activeLaunchPlan: XcodeProjectLaunchPlan?
     private weak var playMenuItem: NSMenuItem?
     private weak var playMenuButton: NSButton?
+    private weak var playMenuSpinner: NSProgressIndicator?
+    private weak var stopMenuButton: NSButton?
 
     private(set) lazy var contextMenu = makeContextMenu()
 
@@ -452,30 +512,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             action: nil,
             keyEquivalent: ""
         )
+        item.isEnabled = true
         item.setAccessibilityLabel("\(configuration.scheme), \(destinationTitle)")
-        item.view = makeConfigurationRow(
-            scheme: configuration.scheme,
-            destination: destinationTitle,
-            isSelectedForPlay: isSelectedForPlay
-        )
         item.state = isSelectedForPlay ? .on : .off
-        let submenu = NSMenu(title: configuration.scheme)
-        submenu.autoenablesItems = false
-
-        let useForPlayItem = NSMenuItem(
-            title: "Use for Play",
-            action: #selector(selectLaunchConfiguration(_:)),
-            keyEquivalent: ""
-        )
-        useForPlayItem.target = self
-        useForPlayItem.representedObject = [
-            "projectPath": projectURL.path,
-            "scheme": configuration.scheme,
-        ]
-        useForPlayItem.state = isSelectedForPlay ? .on : .off
-        useForPlayItem.isEnabled = true
-        submenu.addItem(useForPlayItem)
-        submenu.addItem(.separator())
+        let destinationMenu = NSMenu(title: configuration.scheme)
+        destinationMenu.autoenablesItems = false
 
         if
             let unavailableDestination = configuration.selectedDestination,
@@ -488,7 +529,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             )
             unavailableItem.isEnabled = false
             unavailableItem.state = .on
-            submenu.addItem(unavailableItem)
+            destinationMenu.addItem(unavailableItem)
         }
 
         if configuration.availableDestinations.isEmpty {
@@ -498,7 +539,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                 keyEquivalent: ""
             )
             placeholder.isEnabled = false
-            submenu.addItem(placeholder)
+            destinationMenu.addItem(placeholder)
         } else {
             for destination in configuration.availableDestinations {
                 let destinationItem = NSMenuItem(
@@ -514,23 +555,42 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                 ]
                 destinationItem.state = destination == configuration.selectedDestination ? .on : .off
                 destinationItem.isEnabled = true
-                submenu.addItem(destinationItem)
+                destinationMenu.addItem(destinationItem)
             }
         }
-        item.submenu = submenu
+        item.view = makeConfigurationRow(
+            scheme: configuration.scheme,
+            destination: destinationTitle,
+            isSelectedForPlay: isSelectedForPlay,
+            projectURL: projectURL,
+            destinationMenu: destinationMenu
+        )
         return item
     }
 
     private func makeConfigurationRow(
         scheme: String,
         destination: String,
-        isSelectedForPlay: Bool
+        isSelectedForPlay: Bool,
+        projectURL: URL,
+        destinationMenu: NSMenu
     ) -> NSView {
-        MenuDetailItemView(
+        let row = MenuDetailItemView(
             title: scheme,
             detail: destination,
             selection: isSelectedForPlay
         )
+        row.addConfigurationActions(
+            target: self,
+            selection: [
+                "projectPath": projectURL.path,
+                "scheme": scheme,
+            ],
+            destinationMenu: destinationMenu,
+            selectSchemeAction: #selector(selectLaunchConfiguration(_:)),
+            showDestinationMenuAction: #selector(showDestinationMenu(_:))
+        )
+        return row
     }
 
     private func makePlayItem() -> NSMenuItem {
@@ -538,37 +598,86 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         item.target = self
         let row = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 54))
         row.autoresizingMask = [.width]
-        let button = NSButton(title: "Run Project", target: self, action: #selector(playFromMenu))
-        button.bezelStyle = .rounded
-        button.controlSize = .large
-        button.font = .systemFont(ofSize: 16, weight: .semibold)
-        button.bezelColor = .controlAccentColor
-        button.image = menuBarImage(description: "XPlay")
-        button.imagePosition = .imageLeading
-        button.translatesAutoresizingMaskIntoConstraints = false
-        row.addSubview(button)
+        let playButton = NSButton(title: "Run Project", target: self, action: #selector(playFromMenu))
+        playButton.identifier = NSUserInterfaceItemIdentifier("run-project-button")
+        playButton.bezelStyle = .rounded
+        playButton.controlSize = .large
+        playButton.font = .systemFont(ofSize: 16, weight: .medium)
+        playButton.bezelColor = .controlAccentColor
+        playButton.image = menuBarImage(description: "XPlay")
+        playButton.imagePosition = .imageLeading
+        playButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        let spinner = NSProgressIndicator()
+        spinner.identifier = NSUserInterfaceItemIdentifier("run-project-spinner")
+        spinner.style = .spinning
+        spinner.controlSize = .small
+        spinner.isIndeterminate = true
+        spinner.isDisplayedWhenStopped = false
+        spinner.isHidden = true
+        spinner.setAccessibilityElement(false)
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        playButton.addSubview(spinner)
+
+        let stopButton = NSButton(title: "", target: self, action: #selector(stopFromMenu))
+        stopButton.identifier = NSUserInterfaceItemIdentifier("stop-project-button")
+        stopButton.bezelStyle = .rounded
+        stopButton.controlSize = .large
+        stopButton.image = NSImage(
+            systemSymbolName: "stop.fill",
+            accessibilityDescription: "Stop"
+        )
+        stopButton.imagePosition = .imageOnly
+        stopButton.setAccessibilityLabel("Stop")
+        stopButton.setContentHuggingPriority(.required, for: .horizontal)
+        stopButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let buttons = NSStackView(views: [playButton, stopButton])
+        buttons.orientation = .horizontal
+        buttons.alignment = .centerY
+        buttons.distribution = .fill
+        buttons.spacing = 8
+        buttons.translatesAutoresizingMaskIntoConstraints = false
+        row.addSubview(buttons)
         NSLayoutConstraint.activate([
-            button.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 12),
-            button.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
-            button.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            button.heightAnchor.constraint(equalToConstant: 38),
+            buttons.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 12),
+            buttons.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
+            buttons.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            buttons.heightAnchor.constraint(equalToConstant: 38),
+            stopButton.widthAnchor.constraint(equalToConstant: 44),
+            spinner.trailingAnchor.constraint(equalTo: playButton.trailingAnchor, constant: -14),
+            spinner.centerYAnchor.constraint(equalTo: playButton.centerYAnchor),
+            spinner.widthAnchor.constraint(equalToConstant: 14),
+            spinner.heightAnchor.constraint(equalToConstant: 14),
         ])
         item.view = row
         playMenuItem = item
-        playMenuButton = button
-        updatePlayButton()
+        playMenuButton = playButton
+        playMenuSpinner = spinner
+        stopMenuButton = stopButton
+        updateLaunchButtons()
         return item
     }
 
-    private func updatePlayButton() {
+    private func updateLaunchButtons() {
         let canStart = !isRunning && projectCatalog?.selectedProject?
             .selectedLaunchConfiguration?.isSelectedDestinationAvailable == true
-        playMenuItem?.isEnabled = canStart
+        let canStop = isRunning && activeLauncher != nil
+        playMenuItem?.isEnabled = canStart || canStop
         playMenuButton?.isEnabled = canStart
-        playMenuButton?.title = isRunning ? "Starting…" : "Run Project"
+        stopMenuButton?.isEnabled = canStop
+        playMenuSpinner?.isHidden = !isRunning
+        if isRunning {
+            playMenuSpinner?.startAnimation(nil)
+        } else {
+            playMenuSpinner?.stopAnimation(nil)
+        }
         playMenuButton?.toolTip = projectCatalog?.selectedProject?.selectedLaunchConfiguration.map {
             "Build and launch \($0.scheme)"
         } ?? "Select a scheme and destination to play"
+        stopMenuButton?.toolTip = activeLaunchPlan.map {
+            "Stop building and launching \($0.scheme)"
+        } ?? "No launch in progress"
     }
 
     private func makeChoiceItem(title: String, labels: [String], selectedIndex: Int, action: Selector) -> NSMenuItem {
@@ -596,6 +705,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     @objc private func playFromMenu() {
         contextMenu.cancelTracking()
         startProject()
+    }
+
+    @objc private func stopFromMenu() {
+        contextMenu.cancelTracking()
+        stopProject()
     }
 
     @objc private func setMenuBarContent(_ item: NSMenuItem) {
@@ -777,6 +891,9 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         ) as? String,
         openExternalURL: @escaping (URL) -> Void = { url in
             NSWorkspace.shared.open(url)
+        },
+        presentDestinationMenu: @escaping (NSMenu, NSPoint) -> Void = { menu, point in
+            menu.popUp(positioning: nil, at: point, in: nil)
         }
     ) {
         self.projectCatalog = projectCatalog
@@ -789,6 +906,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         self.presentLaunchFailures = presentLaunchFailures ?? Self.presentDefaultLaunchFailures
         self.appVersion = appVersion
         self.openExternalURL = openExternalURL
+        self.presentDestinationMenu = presentDestinationMenu
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItemView = StatusItemView()
 
@@ -879,7 +997,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     func perform(_ interaction: Interaction) {
         switch interaction {
         case .startProject:
-            startProject()
+            if isRunning {
+                stopProject()
+            } else {
+                startProject()
+            }
         case .showContextMenu:
             showContextMenu()
         }
@@ -900,18 +1022,25 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             return
         }
 
+        let launchID = UUID()
+        activeLaunchID = launchID
         activeLaunchPlan = plan
         setRunning(true)
-        launchNext(in: [plan], at: 0, failures: [])
+        launchNext(in: [plan], at: 0, failures: [], launchID: launchID)
     }
 
     private func launchNext(
         in plans: [XcodeProjectLaunchPlan],
         at index: Int,
-        failures: [LaunchFailure]
+        failures: [LaunchFailure],
+        launchID: UUID
     ) {
+        guard activeLaunchID == launchID else {
+            return
+        }
         guard plans.indices.contains(index) else {
             activeLauncher = nil
+            activeLaunchID = nil
             activeLaunchPlan = nil
             setRunning(false)
             if !failures.isEmpty {
@@ -923,10 +1052,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         let plan = plans[index]
         let launcher = makeLauncher(plan)
         activeLauncher = launcher
+        updateLaunchButtons()
         setRunningProgress(plan: plan, index: index, total: plans.count)
         launcher.launch { [weak self] result in
             Task { @MainActor in
-                guard let self else {
+                guard let self, self.activeLaunchID == launchID else {
                     return
                 }
                 var updatedFailures = failures
@@ -936,10 +1066,23 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                 self.launchNext(
                     in: plans,
                     at: index + 1,
-                    failures: updatedFailures
+                    failures: updatedFailures,
+                    launchID: launchID
                 )
             }
         }
+    }
+
+    private func stopProject() {
+        guard isRunning else {
+            return
+        }
+        let launcher = activeLauncher
+        activeLaunchID = nil
+        activeLauncher = nil
+        activeLaunchPlan = nil
+        setRunning(false)
+        launcher?.cancel()
     }
 
     private func showContextMenu() {
@@ -1002,9 +1145,14 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     @objc
-    private func selectLaunchConfiguration(_ item: NSMenuItem) {
+    private func selectLaunchConfiguration(_ button: ConfigurationActionButton) {
+        contextMenu.cancelTracking()
+        applyLaunchConfigurationSelection(button.representedSelection)
+    }
+
+    private func applyLaunchConfigurationSelection(_ selection: [String: String]?) {
         guard
-            let selection = item.representedObject as? [String: String],
+            let selection,
             let projectPath = selection["projectPath"],
             let scheme = selection["scheme"],
             let projectIndex = projectCatalog?.projects.firstIndex(where: {
@@ -1019,6 +1167,20 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             forProjectAt: projectIndex
         )
         finishCatalogSelection()
+    }
+
+    @objc
+    private func showDestinationMenu(_ button: NSButton) {
+        guard let menu = button.menu else {
+            return
+        }
+        let windowPoint = button.convert(
+            NSPoint(x: button.bounds.maxX + 4, y: button.bounds.maxY),
+            to: nil
+        )
+        let screenPoint = button.window?.convertPoint(toScreen: windowPoint) ?? .zero
+        contextMenu.cancelTracking()
+        presentDestinationMenu(menu, screenPoint)
     }
 
     private func finishCatalogSelection() {
@@ -1106,7 +1268,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         button.setAccessibilityHelp([destination?.displayName, menuHint].compactMap { $0 }.joined(separator: ". "))
         button.toolTip = canStart && appSettings.leftClickAction == .play
             ? description : "\(description) · \(menuHint)"
-        updatePlayButton()
+        updateLaunchButtons()
     }
 
     private func menuBarImage(description: String) -> NSImage? {

@@ -80,17 +80,17 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
 
     private(set) lazy var addButton: NSButton = {
         let button = NSButton(
-            title: "Add Workspace…",
+            title: "Add Project…",
             target: self,
-            action: #selector(chooseWorkspaceFromFinder)
+            action: #selector(chooseProjectFromFinder)
         )
         button.bezelStyle = .rounded
-        button.setAccessibilityLabel("Add workspace")
+        button.setAccessibilityLabel("Add Xcode project or workspace")
         return button
     }()
 
     private(set) lazy var workspaceDetailTitleLabel: NSTextField = {
-        let label = NSTextField(labelWithString: "Select a Workspace")
+        let label = NSTextField(labelWithString: "Select a Project")
         label.identifier = Identifier.workspaceDetailTitle
         label.font = .systemFont(ofSize: 17, weight: .semibold)
         label.lineBreakMode = .byTruncatingTail
@@ -245,30 +245,33 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
         reloadTables()
     }
 
-    func makeWorkspaceOpenPanel() -> NSOpenPanel {
+    func makeProjectOpenPanel() -> NSOpenPanel {
         let panel = NSOpenPanel()
-        panel.title = "Add Xcode Workspace"
-        panel.message = "Choose an Xcode workspace to add to XPlay."
+        panel.title = "Add Xcode Project or Workspace"
+        panel.message = "Choose an .xcodeproj or .xcworkspace file to add to XPlay."
         panel.prompt = "Add"
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.treatsFilePackagesAsDirectories = false
-        if let workspaceType = UTType(filenameExtension: "xcworkspace", conformingTo: .package) {
-            panel.allowedContentTypes = [workspaceType]
+        panel.allowedContentTypes = ["xcodeproj", "xcworkspace"].compactMap {
+            UTType(filenameExtension: $0, conformingTo: .package)
         }
         return panel
     }
 
-    func addWorkspace(at url: URL) async {
-        guard url.pathExtension.lowercased() == "xcworkspace", catalog.add(url) else {
+    func addProject(at url: URL) async {
+        guard
+            ["xcodeproj", "xcworkspace"].contains(url.pathExtension.lowercased()),
+            catalog.add(url)
+        else {
             return
         }
 
         onCatalogChange?()
-        let workspaceURL = url.standardizedFileURL
+        let projectURL = url.standardizedFileURL
         reloadTables()
-        guard let row = catalog.projects.firstIndex(where: { $0.url == workspaceURL }) else {
+        guard let row = catalog.projects.firstIndex(where: { $0.url == projectURL }) else {
             return
         }
         await refreshSchemes(forProjectAt: row)
@@ -354,18 +357,18 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     @objc
-    private func chooseWorkspaceFromFinder() {
+    private func chooseProjectFromFinder() {
         guard let window else {
             return
         }
 
-        let panel = makeWorkspaceOpenPanel()
+        let panel = makeProjectOpenPanel()
         panel.beginSheetModal(for: window) { [weak self] response in
             guard response == .OK, let url = panel.url else {
                 return
             }
             Task { @MainActor [weak self] in
-                await self?.addWorkspace(at: url)
+                await self?.addProject(at: url)
             }
         }
     }
@@ -587,10 +590,10 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
     }
 
     private func updateWorkspaceDetailTitle() {
-        workspaceDetailTitleLabel.stringValue = catalog.selectedProject?.name ?? "Select a Workspace"
+        workspaceDetailTitleLabel.stringValue = catalog.selectedProject?.name ?? "Select a Project"
         workspaceDetailTitleLabel.setAccessibilityLabel(
             catalog.selectedProject.map { "Launch configurations for \($0.name)" }
-                ?? "Select a workspace"
+                ?? "Select a project"
         )
     }
 

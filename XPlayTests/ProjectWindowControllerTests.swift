@@ -18,7 +18,7 @@ final class ProjectWindowControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testWindowUsesWorkspaceDrilldownLayout() throws {
+    func testWindowUsesProjectDrilldownLayout() throws {
         try withCatalog { catalog in
             catalog.add(URL(fileURLWithPath: "/Projects/Example.xcworkspace"))
             let controller = ProjectWindowController(catalog: catalog)
@@ -28,7 +28,7 @@ final class ProjectWindowControllerTests: XCTestCase {
             XCTAssertEqual(controller.window?.title, "XPlay Projects")
             XCTAssertEqual(controller.projectTableView.numberOfRows, 1)
             XCTAssertEqual(controller.schemeTableView.numberOfRows, 0)
-            XCTAssertEqual(controller.addButton.title, "Add Workspace…")
+            XCTAssertEqual(controller.addButton.title, "Add Project…")
 
             let contentView = try XCTUnwrap(controller.window?.contentView)
             XCTAssertTrue(
@@ -57,11 +57,14 @@ final class ProjectWindowControllerTests: XCTestCase {
                 ["Example", "/Projects/Example.xcworkspace"]
             )
 
-            let panel = controller.makeWorkspaceOpenPanel()
+            let panel = controller.makeProjectOpenPanel()
             XCTAssertTrue(panel.canChooseFiles)
             XCTAssertFalse(panel.canChooseDirectories)
             XCTAssertFalse(panel.allowsMultipleSelection)
-            XCTAssertEqual(panel.allowedContentTypes.first?.preferredFilenameExtension, "xcworkspace")
+            XCTAssertEqual(
+                Set(panel.allowedContentTypes.compactMap(\.preferredFilenameExtension)),
+                Set(["xcodeproj", "xcworkspace"])
+            )
         }
     }
 
@@ -120,7 +123,7 @@ final class ProjectWindowControllerTests: XCTestCase {
             )
             controller.loadWindow()
 
-            await controller.addWorkspace(
+            await controller.addProject(
                 at: URL(fileURLWithPath: "/Projects/Example.xcworkspace")
             )
 
@@ -146,6 +149,37 @@ final class ProjectWindowControllerTests: XCTestCase {
                 catalog.selectedProject?.configurations[0].selectedDestination?.name,
                 "My Mac"
             )
+        }
+    }
+
+    @MainActor
+    func testAddingXcodeProjectDiscoversItsSchemesAndDestination() async throws {
+        await withCatalog { catalog in
+            let projectURL = URL(fileURLWithPath: "/Projects/Example.xcodeproj")
+            let resolver = XcodeSchemeResolver { arguments in
+                if arguments.first == "-showdestinations" {
+                    XCTAssertEqual(arguments[1...4], [
+                        "-project", projectURL.path, "-scheme", "Example-macOS",
+                    ])
+                    return Data("{ platform:macOS, arch:arm64, id:mac-id, name:My Mac }".utf8)
+                }
+                XCTAssertEqual(arguments, ["-list", "-json", "-project", projectURL.path])
+                return Data("{\"project\":{\"schemes\":[\"Example-macOS\"]}}".utf8)
+            }
+            let controller = ProjectWindowController(catalog: catalog, schemeResolver: resolver)
+            controller.loadWindow()
+
+            await controller.addProject(at: projectURL)
+            await controller.setSchemeEnabled(true, scheme: "Example-macOS")
+
+            XCTAssertEqual(catalog.selectedProject?.kind, .project)
+            XCTAssertEqual(catalog.selectedProject?.schemes, ["Example-macOS"])
+            XCTAssertEqual(
+                catalog.selectedProject?.configurations.first?.availableDestinations.first?.name,
+                "My Mac"
+            )
+            XCTAssertEqual(controller.projectTableView.numberOfRows, 1)
+            XCTAssertEqual(controller.schemeTableView.numberOfRows, 1)
         }
     }
 
@@ -197,7 +231,7 @@ final class ProjectWindowControllerTests: XCTestCase {
                 schemeResolver: makeResolver(schemes: ["Example"], destinations: "")
             )
             controller.loadWindow()
-            await controller.addWorkspace(
+            await controller.addProject(
                 at: URL(fileURLWithPath: "/Projects/Example.xcworkspace")
             )
 
