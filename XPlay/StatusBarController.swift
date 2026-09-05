@@ -607,6 +607,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         playButton.image = menuBarImage(description: "XPlay")
         playButton.imagePosition = .imageLeading
         playButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        playButton.translatesAutoresizingMaskIntoConstraints = false
 
         let spinner = NSProgressIndicator()
         spinner.identifier = NSUserInterfaceItemIdentifier("run-project-spinner")
@@ -631,20 +632,19 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         stopButton.setAccessibilityLabel("Stop")
         stopButton.setContentHuggingPriority(.required, for: .horizontal)
         stopButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        stopButton.translatesAutoresizingMaskIntoConstraints = false
 
-        let buttons = NSStackView(views: [playButton, stopButton])
-        buttons.orientation = .horizontal
-        buttons.alignment = .centerY
-        buttons.distribution = .fill
-        buttons.spacing = 8
-        buttons.translatesAutoresizingMaskIntoConstraints = false
-        row.addSubview(buttons)
+        row.addSubview(playButton)
+        row.addSubview(stopButton)
         NSLayoutConstraint.activate([
-            buttons.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 12),
-            buttons.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
-            buttons.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            buttons.heightAnchor.constraint(equalToConstant: 38),
+            playButton.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 12),
+            playButton.trailingAnchor.constraint(equalTo: stopButton.leadingAnchor, constant: -8),
+            playButton.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            playButton.heightAnchor.constraint(equalToConstant: 38),
+            stopButton.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
+            stopButton.centerYAnchor.constraint(equalTo: row.centerYAnchor),
             stopButton.widthAnchor.constraint(equalToConstant: 44),
+            stopButton.heightAnchor.constraint(equalToConstant: 38),
             spinner.trailingAnchor.constraint(equalTo: playButton.trailingAnchor, constant: -14),
             spinner.centerYAnchor.constraint(equalTo: playButton.centerYAnchor),
             spinner.widthAnchor.constraint(equalToConstant: 14),

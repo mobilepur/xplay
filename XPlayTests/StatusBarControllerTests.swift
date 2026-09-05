@@ -147,6 +147,8 @@ final class StatusBarControllerTests: XCTestCase {
                     $0.identifier?.rawValue == "run-project-spinner"
                 }
             )
+            XCTAssertTrue(play.superview === row)
+            XCTAssertTrue(stop.superview === row)
             row.frame.size.width = 320
             row.layoutSubtreeIfNeeded()
             XCTAssertGreaterThanOrEqual(row.frame.height, 48)
