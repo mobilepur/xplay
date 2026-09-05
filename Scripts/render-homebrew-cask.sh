@@ -37,15 +37,11 @@ cask "xplay" do
 
   app "XPlay.app"
 
-  postflight do
-    path = "#{appdir}/XPlay.app"
-    quarantine = system_command(
-      "/usr/bin/xattr",
-      args:         ["-p", "com.apple.quarantine", path],
-      must_succeed: false,
-      print_stderr: false,
-    )
-    system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", path] if quarantine&.success?
+  postflight_steps do
+    run "/usr/bin/xattr",
+        args:         ["-dr", "com.apple.quarantine", "{{appdir}}/XPlay.app"],
+        must_succeed: false,
+        print_stderr: false
   end
 
   uninstall quit: "de.mobilepur.XPlay"

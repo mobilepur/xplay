@@ -33,24 +33,25 @@ class CaskPostflightHarness
     Object.send(:remove_method, :cask)
   end
 
-  def run
-    raise "Generated Cask has no postflight block" unless @postflight
+  def execute
+    raise "Generated Cask has no postflight_steps block" unless @postflight_steps
 
-    instance_eval(&@postflight)
+    instance_eval(&@postflight_steps)
   end
 
-  def postflight(&block)
-    @postflight = block
+  def postflight_steps(&block)
+    @postflight_steps = block
   end
 
   def appdir
     @appdir
   end
 
-  def system_command(executable, args:, must_succeed: true, print_stderr: true)
-    _stdout, stderr, status = Open3.capture3(executable, *args)
+  def run(executable, args:, must_succeed: true, print_stderr: true, **_options)
+    expanded_args = args.map { |arg| arg.gsub("{{appdir}}", @appdir.to_s) }
+    _stdout, stderr, status = Open3.capture3(executable, *expanded_args)
     warn stderr if print_stderr && !stderr.empty?
-    raise "Command failed: #{executable} #{args.join(' ')}" if must_succeed && !status.success?
+    raise "Command failed: #{executable} #{expanded_args.join(' ')}" if must_succeed && !status.success?
 
     CommandResult.new(status)
   end
@@ -89,9 +90,9 @@ cask_path, root = ARGV
 harness = CaskPostflightHarness.new(root)
 harness.load(cask_path)
 
-harness.run
+harness.execute
 
 set_quarantine(harness.app_path)
-harness.run
+harness.execute
 
 raise "App quarantine attribute was not removed" if quarantined?(harness.app_path)
