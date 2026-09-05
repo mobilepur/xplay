@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify tag version and main ancestry
+        run: |
+          app_version="$(xcodebuild -project XPlay.xcodeproj -target XPlay -configuration Release -showBuildSettings | awk '/MARKETING_VERSION =/{print $3; exit}')"
+          test "$GITHUB_REF_NAME" = "v$app_version"
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+      - name: Test
+        run: |
+          xcodebuild test \
+            -project XPlay.xcodeproj \
+            -scheme XPlay \
+            -destination 'platform=macOS' \
+            -derivedDataPath /tmp/XPlayReleaseTests
+
+      - name: Test release workflow
+        run: bash Tests/PackagingTests/ReleaseWorkflowTests.sh
+
+      - name: Test release package
+        run: bash Tests/PackagingTests/ReleasePackageTests.sh
+
+      - name: Validate Homebrew tap token
+        env:
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+        run: |
+          if [[ -z "$HOMEBREW_TAP_GITHUB_TOKEN" ]]; then
+            echo "::error::Missing GitHub secret: HOMEBREW_TAP_GITHUB_TOKEN"
+            exit 1
+          fi
+
+      - name: Build release package
+        run: bash Scripts/build-release.sh dist
+
+      - name: Prepare checksum
+        run: |
+          (cd dist && shasum -a 256 XPlay.tar.gz > checksums.txt)
+
+      - name: Publish release package and prepare Homebrew Cask
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            published_release="$RUNNER_TEMP/published-release"
+            mkdir "$published_release"
+            gh release download "$GITHUB_REF_NAME" \
+              --pattern XPlay.tar.gz \
+              --pattern checksums.txt \
+              --dir "$published_release"
+            (cd "$published_release" && shasum -a 256 -c checksums.txt)
+            checksum="$(awk '{print $1}' "$published_release/checksums.txt")"
+          else
+            gh release create "$GITHUB_REF_NAME" dist/XPlay.tar.gz dist/checksums.txt --generate-notes --title "XPlay $GITHUB_REF_NAME"
+            checksum="$(awk '{print $1}' dist/checksums.txt)"
+          fi
+          version="${GITHUB_REF_NAME#v}"
+          bash Scripts/render-homebrew-cask.sh "$version" "$checksum" > dist/xplay.rb
+
+      - uses: actions/checkout@v6
+        with:
+          repository: mobilepur/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update Homebrew tap
+        run: |
+          install -m 644 dist/xplay.rb homebrew-tap/Casks/xplay.rb
+          git -C homebrew-tap config user.name "github-actions[bot]"
+          git -C homebrew-tap config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C homebrew-tap add Casks/xplay.rb
+          if git -C homebrew-tap diff --cached --quiet; then
+            exit 0
+          fi
+          git -C homebrew-tap commit -m "Brew cask update for xplay version $GITHUB_REF_NAME"
+          git -C homebrew-tap push origin HEAD:main

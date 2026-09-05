@@ -2,38 +2,94 @@ import XCTest
 @testable import XPlay
 
 final class XcodeProjectLaunchPlanTests: XCTestCase {
-    func testBuildArgumentsSelectConfiguredMacOSScheme() {
-        let plan = makePlan()
+    func testWorkspaceBuildArgumentsUseConfiguredDestinationAndGlobalMacroSetting() {
+        let plan = makePlan(acceptsMacros: true)
 
         XCTAssertEqual(
             plan.buildArguments,
             [
-                "-project", "/Projects/Example.xcodeproj",
+                "-skipMacroValidation",
+                "-workspace", "/Projects/Example.xcworkspace",
                 "-scheme", "Example-macOS",
                 "-configuration", "Debug",
-                "-destination", "platform=macOS",
+                "-destination", "platform=macOS,id=mac-id",
                 "-derivedDataPath", "/tmp/XPlayDerivedData",
                 "build",
             ]
         )
     }
 
-    func testBuiltAppPointsToConfiguredDebugProduct() {
-        let plan = makePlan()
+    func testSimulatorProductUsesSimulatorBuildDirectory() {
+        let plan = makePlan(
+            destination: XcodeDestination(
+                platform: .iOSSimulator,
+                id: "sim-id",
+                name: "iPhone 17 Pro"
+            )
+        )
 
         XCTAssertEqual(
             plan.builtAppURL.path,
-            "/tmp/XPlayDerivedData/Build/Products/Debug/Example.app"
+            "/tmp/XPlayDerivedData/Build/Products/Debug-iphonesimulator/Example.app"
         )
     }
 
-    private func makePlan() -> XcodeProjectLaunchPlan {
+    func testCreatesPlanForSelectedConfigurationWithSchemeSpecificPaths() throws {
+        let simulator = XcodeDestination(
+            platform: .iOSSimulator,
+            id: "sim-id",
+            name: "iPhone 17 Pro"
+        )
+        let project = SavedProject(
+            url: URL(fileURLWithPath: "/Projects/Example.xcworkspace"),
+            kind: .workspace,
+            configurations: [
+                LaunchConfiguration(
+                    scheme: "Example-iOS",
+                    isEnabled: true,
+                    availableDestinations: [simulator],
+                    selectedDestinationID: simulator.id
+                ),
+            ]
+        )
+
+        let configuration = try XCTUnwrap(project.selectedLaunchConfiguration)
+        let plan = try XCTUnwrap(XcodeProjectLaunchPlan.make(
+            for: project,
+            configuration: configuration,
+            cacheDirectory: URL(fileURLWithPath: "/Caches/XPlay"),
+            acceptsMacros: true
+        ))
+
+        XCTAssertEqual(plan.scheme, "Example-iOS")
+        XCTAssertEqual(
+            plan.derivedDataURL.path,
+            "/Caches/XPlay/DerivedData/Example/Example-iOS"
+        )
+        XCTAssertEqual(
+            plan.logURL.path,
+            "/Caches/XPlay/Logs/Example-Example-iOS-build.log"
+        )
+        XCTAssertTrue(plan.acceptsMacros)
+    }
+
+    private func makePlan(
+        destination: XcodeDestination = XcodeDestination(
+            platform: .macOS,
+            id: "mac-id",
+            name: "My Mac"
+        ),
+        acceptsMacros: Bool = false
+    ) -> XcodeProjectLaunchPlan {
         XcodeProjectLaunchPlan(
-            projectURL: URL(fileURLWithPath: "/Projects/Example.xcodeproj"),
+            containerURL: URL(fileURLWithPath: "/Projects/Example.xcworkspace"),
+            containerKind: .workspace,
             scheme: "Example-macOS",
+            destination: destination,
             derivedDataURL: URL(fileURLWithPath: "/tmp/XPlayDerivedData"),
             logURL: URL(fileURLWithPath: "/tmp/Example-build.log"),
-            productName: "Example"
+            productName: "Example",
+            acceptsMacros: acceptsMacros
         )
     }
 }
