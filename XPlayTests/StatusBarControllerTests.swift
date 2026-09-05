@@ -163,6 +163,7 @@ final class StatusBarControllerTests: XCTestCase {
             XCTAssertEqual(stop.title, "")
             XCTAssertEqual(stop.imagePosition, .imageOnly)
             XCTAssertEqual(stop.accessibilityLabel(), "Stop")
+            XCTAssertEqual(stop.intrinsicContentSize.width, 44, accuracy: 0.5)
             XCTAssertLessThan(
                 stop.contentCompressionResistancePriority(for: .horizontal),
                 .required

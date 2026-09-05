@@ -11,6 +11,13 @@ private final class ExternalLinkButton: NSButton {
 }
 
 @MainActor
+private final class CompactStopButton: NSButton {
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: 44, height: super.intrinsicContentSize.height)
+    }
+}
+
+@MainActor
 private final class MenuDetailItemView: NSView {
     private let titleLabel: NSTextField
     private let detailLabel: NSTextField
@@ -625,7 +632,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         spinner.translatesAutoresizingMaskIntoConstraints = false
         playButton.addSubview(spinner)
 
-        let stopButton = NSButton(title: "", target: self, action: #selector(stopFromMenu))
+        let stopButton = CompactStopButton(
+            title: "",
+            target: self,
+            action: #selector(stopFromMenu)
+        )
         stopButton.identifier = NSUserInterfaceItemIdentifier("stop-project-button")
         stopButton.bezelStyle = .rounded
         stopButton.controlSize = .large
