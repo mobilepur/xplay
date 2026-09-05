@@ -151,10 +151,13 @@ final class StatusBarControllerTests: XCTestCase {
             XCTAssertTrue(stop.superview === row)
             row.frame.size.width = 320
             row.layoutSubtreeIfNeeded()
+            // Auto Layout uses alignment rectangles, excluding OS-specific bezel margins.
+            let playAlignmentRect = play.alignmentRect(forFrame: play.frame)
+            let stopAlignmentRect = stop.alignmentRect(forFrame: stop.frame)
             XCTAssertGreaterThanOrEqual(row.frame.height, 48)
-            XCTAssertLessThan(play.frame.maxX, stop.frame.minX)
-            XCTAssertGreaterThanOrEqual(play.frame.width, play.intrinsicContentSize.width)
-            XCTAssertEqual(stop.frame.width, 44, accuracy: 0.5)
+            XCTAssertEqual(stopAlignmentRect.minX - playAlignmentRect.maxX, 8, accuracy: 0.5)
+            XCTAssertGreaterThanOrEqual(playAlignmentRect.width, play.intrinsicContentSize.width)
+            XCTAssertEqual(stopAlignmentRect.width, 44, accuracy: 0.5)
             XCTAssertEqual(play.title, "Run Project")
             XCTAssertEqual(play.font, .systemFont(ofSize: 16, weight: .medium))
             XCTAssertEqual(play.image?.name(), NSImage.Name("XPlayIcon"))

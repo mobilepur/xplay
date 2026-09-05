@@ -1,9 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <rect x="72" y="60" width="880" height="880" rx="198" fill="#e9e9e5"/>
+  <defs>
+    <linearGradient id="background" x1="20%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="38%" stop-color="#eeeeea"/>
+      <stop offset="100%" stop-color="#c3c3bd"/>
+    </linearGradient>
+  </defs>
+  <rect x="72" y="60" width="880" height="880" rx="198" fill="url(#background)"/>
   <rect x="73" y="61" width="878" height="878" rx="197" fill="none" stroke="#ffffff" stroke-opacity="0.8" stroke-width="2"/>
   <path
     fill="#20201f"
     d="M1 3 L4 3 L7 7 L10 3 L12 3 L12 15 L10 15 L7 11 L4 15 L1 15 L5.5 9 Z M13 3 L14 3 L20 9 L14 15 L13 15 Z"
-    transform="translate(218 260) scale(28)"
+    transform="translate(125.6 180.8) scale(36.8)"
   />
 </svg>

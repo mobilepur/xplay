@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 1.0.1 — 2026-09-05
+
+### Changed
+
+- Enlarge the app icon's XPlay symbol and add a soft, diagonal background gradient.
+- Simplify the README to a short introduction, installation, and updates.
+
+### Fixed
+
+- Use Homebrew's structured postflight steps for installation compatibility.
+
 ## 1.0.0 — 2026-09-05
 
 ### Added
