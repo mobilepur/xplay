@@ -378,14 +378,24 @@ final class StatusBarControllerTests: XCTestCase {
         XCTAssertNotNil(versionRow.subviews.first {
             $0.identifier?.rawValue == "navigation-chevron"
         })
+        let versionLink = try XCTUnwrap(
+            descendants(of: versionRow).compactMap { $0 as? NSButton }.first {
+                $0.identifier?.rawValue == "external-link-button"
+            }
+        )
         let reportItem = try XCTUnwrap(menu.items.first { $0.title == "Report a Problem…" })
         let reportRow = try XCTUnwrap(reportItem.view)
         XCTAssertNotNil(reportRow.subviews.first {
             $0.identifier?.rawValue == "navigation-chevron"
         })
+        let reportLink = try XCTUnwrap(
+            descendants(of: reportRow).compactMap { $0 as? NSButton }.first {
+                $0.identifier?.rawValue == "external-link-button"
+            }
+        )
 
-        menu.performActionForItem(at: menu.index(of: versionItem))
-        menu.performActionForItem(at: menu.index(of: reportItem))
+        versionLink.performClick(nil)
+        reportLink.performClick(nil)
 
         XCTAssertEqual(openedURLs.map(\.absoluteString), [
             "https://github.com/mobilepur/xplay/releases/tag/v1.2.3",
@@ -405,10 +415,13 @@ final class StatusBarControllerTests: XCTestCase {
         XCTAssertTrue(versionRow.subviews.compactMap { $0 as? NSTextField }.contains {
             $0.stringValue == "Development"
         })
-
-        controller.contextMenu.performActionForItem(
-            at: controller.contextMenu.index(of: versionItem)
+        let versionLink = try XCTUnwrap(
+            descendants(of: versionRow).compactMap { $0 as? NSButton }.first {
+                $0.identifier?.rawValue == "external-link-button"
+            }
         )
+
+        versionLink.performClick(nil)
 
         XCTAssertEqual(openedURLs.first?.absoluteString,
                        "https://github.com/mobilepur/xplay/releases")

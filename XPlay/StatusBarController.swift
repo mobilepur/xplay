@@ -6,6 +6,11 @@ private final class ConfigurationActionButton: NSButton {
 }
 
 @MainActor
+private final class ExternalLinkButton: NSButton {
+    var externalURL: URL?
+}
+
+@MainActor
 private final class MenuDetailItemView: NSView {
     private let titleLabel: NSTextField
     private let detailLabel: NSTextField
@@ -784,11 +789,34 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         item.representedObject = url
         item.isEnabled = true
         item.toolTip = toolTip
-        item.view = MenuDetailItemView(
+        let row = MenuDetailItemView(
             title: title,
             detail: detail,
             chevronIdentifier: "navigation-chevron"
         )
+        let linkButton = ExternalLinkButton(
+            title: "",
+            target: self,
+            action: #selector(openExternalLink(_:))
+        )
+        linkButton.identifier = NSUserInterfaceItemIdentifier("external-link-button")
+        linkButton.externalURL = url
+        linkButton.isBordered = false
+        linkButton.isTransparent = true
+        linkButton.focusRingType = .none
+        linkButton.toolTip = toolTip
+        linkButton.setAccessibilityLabel(
+            detail.isEmpty ? title : "\(title), \(detail)"
+        )
+        linkButton.translatesAutoresizingMaskIntoConstraints = false
+        row.addSubview(linkButton)
+        NSLayoutConstraint.activate([
+            linkButton.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            linkButton.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+            linkButton.topAnchor.constraint(equalTo: row.topAnchor),
+            linkButton.bottomAnchor.constraint(equalTo: row.bottomAnchor),
+        ])
+        item.view = row
         item.setAccessibilityLabel(
             detail.isEmpty ? title : "\(title), \(detail)"
         )
@@ -1093,8 +1121,10 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     @objc
-    private func openExternalLink(_ item: NSMenuItem) {
-        guard let url = item.representedObject as? URL else { return }
+    private func openExternalLink(_ sender: Any) {
+        let url = (sender as? ExternalLinkButton)?.externalURL
+            ?? (sender as? NSMenuItem)?.representedObject as? URL
+        guard let url else { return }
         contextMenu.cancelTracking()
         openExternalURL(url)
     }
