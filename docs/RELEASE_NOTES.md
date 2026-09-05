@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 1.0.2 — 2026-09-05
+
+### Fixed
+
+- Align Quit with the other menu labels while keeping the whole row clickable and Command-Q available.
+- Add a separate Change button for devices and keep the main menu visible while
+  its device submenu is open.
+- Restart the rebuilt macOS app on Play without closing other copies from different paths.
+- Keep build data and logs separate for different containers and schemes, including worktrees.
+- Refresh destinations at startup, when opening the status menu, and after switching projects;
+  keep removed destinations visible as unavailable and show discovery failures with a retry hint.
+- Exclude ineligible destinations and destinations with Xcode errors.
+- Validate release versions against project metadata instead of a fixed version number.
+- Prevent older releases from replacing a newer Homebrew Cask and serialize release updates.
+
 ## 1.0.1 — 2026-09-05
 
 ### Changed

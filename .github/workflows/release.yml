@@ -8,6 +8,13 @@ on:
 permissions:
   contents: write
 
+# Every tag shares this group: queued older tags are harmless because the tap
+# updater also compares versions before writing.
+concurrency:
+  group: xplay-release
+  queue: max
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: macos-15
@@ -34,6 +41,11 @@ jobs:
 
       - name: Test release workflow
         run: bash Tests/PackagingTests/ReleaseWorkflowTests.sh
+
+      - name: Test release versions and Homebrew updates
+        run: |
+          bash Tests/PackagingTests/ReleaseVersionTests.sh
+          ruby Tests/PackagingTests/HomebrewUpdateTests.rb
 
       - name: Test release package
         run: bash Tests/PackagingTests/ReleasePackageTests.sh
@@ -81,13 +93,4 @@ jobs:
           path: homebrew-tap
 
       - name: Update Homebrew tap
-        run: |
-          install -m 644 dist/xplay.rb homebrew-tap/Casks/xplay.rb
-          git -C homebrew-tap config user.name "github-actions[bot]"
-          git -C homebrew-tap config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C homebrew-tap add Casks/xplay.rb
-          if git -C homebrew-tap diff --cached --quiet; then
-            exit 0
-          fi
-          git -C homebrew-tap commit -m "Brew cask update for xplay version $GITHUB_REF_NAME"
-          git -C homebrew-tap push origin HEAD:main
+        run: bash Scripts/update-homebrew-tap.sh homebrew-tap dist/xplay.rb

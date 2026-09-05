@@ -31,7 +31,11 @@ verifies the pinned archive checksum.
 2. Move the relevant entries in `docs/RELEASE_NOTES.md` from **Unreleased** to
    the new version.
 3. Run the full Xcode test suite and
-   `bash Tests/PackagingTests/ReleasePackageTests.sh`.
+   `bash Tests/PackagingTests/ReleaseWorkflowTests.sh`,
+   `bash Tests/PackagingTests/ReleaseVersionTests.sh`,
+   `ruby Tests/PackagingTests/HomebrewUpdateTests.rb`, and
+   `bash Tests/PackagingTests/ReleasePackageTests.sh`. Package version and build
+   metadata must match `project.yml`.
 4. Merge the release commit into `main`.
 5. Create and push a matching tag such as `v1.0.0` from that `main` commit.
 6. Verify that the GitHub release contains `XPlay.tar.gz` and `checksums.txt`.
@@ -41,4 +45,13 @@ verifies the pinned archive checksum.
 
 Release assets are immutable after publication. Re-running the workflow for the
 same tag downloads and verifies the existing archive and checksum, then repairs
-only the Homebrew Cask. Changed artifacts require a new version and tag.
+only the Homebrew Cask when that version is still current. An older release
+never replaces a newer Cask. All release tags share one workflow concurrency
+group with `queue: max`, so pending releases wait instead of replacing each other
+(up to [GitHub's limit of 100 pending runs](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)).
+The tap updater fetches the latest tap state before comparing numeric versions.
+Changed artifacts require a new version and tag.
+
+These safeguards apply to tags containing this workflow. Re-running a historical
+workflow from before the safeguards were added still executes its old update
+logic; do not use those runs to repair the current Cask.

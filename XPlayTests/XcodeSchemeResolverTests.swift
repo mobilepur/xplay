@@ -83,6 +83,24 @@ final class XcodeSchemeResolverTests: XCTestCase {
         )
     }
 
+    func testExcludesIneligibleDestinationsAndRowsWithErrors() throws {
+        let resolver = XcodeSchemeResolver { _ in
+            Data("""
+            Available destinations for the "Example" scheme:
+                { platform:macOS, arch:arm64, id:available, name:My Mac }
+                { platform:iOS Simulator, id:broken, OS:26.0, name:iPhone, error:Runtime is unavailable }
+            Ineligible destinations for the "Example" scheme:
+                { platform:macOS, arch:arm64, id:old-mac, name:Other Mac }
+                { platform:iOS Simulator, id:old-sim, name:iPhone, error:Runtime is unavailable }
+            """.utf8)
+        }
+        let destinations = try resolver.destinations(
+            for: URL(fileURLWithPath: "/Projects/Example.xcodeproj"),
+            kind: .project, scheme: "Example"
+        )
+        XCTAssertEqual(destinations.map(\.id), ["available"])
+    }
+
     func testProcessRunnerDrainsLargeOutputAndDiagnosticsConcurrently() throws {
         let script = """
         i=0

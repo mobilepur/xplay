@@ -83,11 +83,22 @@ final class XcodeSchemeResolver: @unchecked Sendable {
     }
 
     private static func parseDestinations(_ output: String) -> [XcodeDestination] {
-        output
+        var isIneligibleSection = false
+        return output
             .split(whereSeparator: \.isNewline)
             .compactMap { line -> XcodeDestination? in
                 let text = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard text.hasPrefix("{"), text.hasSuffix("}"), !text.contains("variant:") else {
+                if text.hasPrefix("Ineligible destinations") {
+                    isIneligibleSection = true
+                } else if text.hasPrefix("Available destinations") {
+                    isIneligibleSection = false
+                }
+                guard
+                    !isIneligibleSection,
+                    text.hasPrefix("{"), text.hasSuffix("}"),
+                    !text.contains("variant:"),
+                    field("error", in: text) == nil
+                else {
                     return nil
                 }
                 guard

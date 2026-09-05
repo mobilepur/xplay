@@ -42,9 +42,9 @@ if grep -Eq 'APPLE_|BUILD_CERTIFICATE|P12_PASSWORD|DEVELOPER_ID' "$release_workf
     exit 1
 fi
 
-grep -Fq 'MARKETING_VERSION: "1.0.1"' "$project_spec"
-grep -Fq 'CURRENT_PROJECT_VERSION: "2"' "$project_spec"
-grep -Fq '## 1.0.1' "$release_notes"
+expected_versions="$(ruby "$repository_root/Scripts/verify-release-version.rb" "$project_spec")"
+read -r app_version build_number <<< "$expected_versions"
+grep -Eq "^## ${app_version//./\.}([[:space:]]|$)" "$release_notes"
 grep -Fq 'brew install --cask mobilepur/tap/xplay' "$readme"
 grep -Fq '`HOMEBREW_TAP_GITHUB_TOKEN`' "$release_guide"
 grep -Fq 'docs/RELEASE_NOTES.md' "$release_guide"

@@ -30,14 +30,15 @@ private final class MenuDetailItemView: NSView {
         detail: String,
         selection: Bool? = nil,
         chevronIdentifier: String? = nil,
-        showsChevron: Bool = true
+        showsChevron: Bool = true,
+        trailingAccessoryWidth: CGFloat = 0
     ) {
         titleLabel = NSTextField(labelWithString: title)
         detailLabel = NSTextField(labelWithString: detail)
         checkmark = NSImageView()
         chevron = NSImageView()
 
-        super.init(frame: NSRect(x: 0, y: 0, width: 320, height: 28))
+        super.init(frame: NSRect(x: 0, y: 0, width: 320 + trailingAccessoryWidth, height: 28))
 
         autoresizingMask = [.width]
 
@@ -96,7 +97,7 @@ private final class MenuDetailItemView: NSView {
             detailLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             showsChevron
                 ? detailLabel.trailingAnchor.constraint(equalTo: chevron.leadingAnchor, constant: -8)
-                : detailLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+                : detailLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12 - trailingAccessoryWidth),
             chevron.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             chevron.centerYAnchor.constraint(equalTo: centerYAnchor),
             chevron.widthAnchor.constraint(equalToConstant: 8),
@@ -167,8 +168,10 @@ private final class MenuDetailItemView: NSView {
         )
         destinationButton.identifier = NSUserInterfaceItemIdentifier("destination-menu-button")
         destinationButton.menu = destinationMenu
-        destinationButton.isBordered = false
-        destinationButton.isTransparent = true
+        destinationButton.title = "Change…"
+        destinationButton.bezelStyle = .rounded
+        destinationButton.controlSize = .small
+        destinationButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         destinationButton.focusRingType = .none
         destinationButton.toolTip = "Choose device for \(titleLabel.stringValue)"
         destinationButton.setAccessibilityLabel(
@@ -180,13 +183,13 @@ private final class MenuDetailItemView: NSView {
         addSubview(destinationButton)
         NSLayoutConstraint.activate([
             schemeButton.leadingAnchor.constraint(equalTo: leadingAnchor),
-            schemeButton.trailingAnchor.constraint(equalTo: detailLabel.leadingAnchor),
+            schemeButton.trailingAnchor.constraint(equalTo: destinationButton.leadingAnchor, constant: -4),
             schemeButton.topAnchor.constraint(equalTo: topAnchor),
             schemeButton.bottomAnchor.constraint(equalTo: bottomAnchor),
-            destinationButton.leadingAnchor.constraint(equalTo: detailLabel.leadingAnchor),
-            destinationButton.trailingAnchor.constraint(equalTo: trailingAnchor),
-            destinationButton.topAnchor.constraint(equalTo: topAnchor),
-            destinationButton.bottomAnchor.constraint(equalTo: bottomAnchor),
+            destinationButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            destinationButton.widthAnchor.constraint(equalToConstant: 70),
+            destinationButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            destinationButton.heightAnchor.constraint(equalToConstant: 22),
         ])
     }
 
@@ -390,6 +393,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private(set) var statusItem: NSStatusItem
     private let statusItemView: StatusItemView
     private let projectCatalog: ProjectCatalog?
+    private let schemeResolver: XcodeSchemeResolver
     private let appSettings: AppSettings
     private let onEditProjects: (() -> Void)?
     private let onCatalogChange: (() -> Void)?
@@ -399,7 +403,12 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private let presentLaunchFailures: ([LaunchFailure]) -> Void
     private let appVersion: String?
     private let openExternalURL: (URL) -> Void
-    private let presentDestinationMenu: (NSMenu, NSPoint) -> Void
+    private let terminateApplication: @MainActor () -> Void
+    private let openDestinationSubmenu: (NSMenuItem) -> Void
+    private weak var destinationMenuParent: NSMenuItem?
+    private var deferredMenuRefresh = false
+    private var refreshingProjectURLs = Set<URL>()
+    private var destinationRefreshErrors: [URL: Set<String>] = [:]
     private var activeLauncher: (any ProjectLaunching)?
     private var activeLaunchID: UUID?
     private var isRunning = false
@@ -431,6 +440,21 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                             == project.selectedLaunchConfigurationScheme
                     )
                 )
+            }
+        }
+        if let projectURL = projectCatalog?.selectedProject?.url {
+            let message: String?
+            if refreshingProjectURLs.contains(projectURL) {
+                message = "Refreshing destinations…"
+            } else if let failedSchemes = destinationRefreshErrors[projectURL], !failedSchemes.isEmpty {
+                message = "Could not refresh \(failedSchemes.sorted().joined(separator: ", ")). Reopen menu to retry."
+            } else {
+                message = nil
+            }
+            if let message {
+                let item = NSMenuItem(title: message, action: nil, keyEquivalent: "")
+                item.isEnabled = false
+                menu.addItem(item)
             }
         }
         menu.addItem(makePlayItem())
@@ -495,6 +519,83 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         menu.addItem(makeQuitItem())
 
         return menu
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        guard menu === contextMenu else { return }
+        Task { [weak self] in
+            await self?.refreshDestinations()
+        }
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        guard let parent = destinationMenuParent,
+              menu === parent.submenu || menu === parent.menu else { return }
+        parent.submenu = nil
+        destinationMenuParent = nil
+        if deferredMenuRefresh {
+            deferredMenuRefresh = false
+            rebuildContextMenu()
+        }
+    }
+
+    func refreshDestinations() async {
+        guard let project = projectCatalog?.selectedProject,
+              !project.enabledConfigurations.isEmpty,
+              refreshingProjectURLs.insert(project.url).inserted else {
+            return
+        }
+        destinationRefreshErrors[project.url] = nil
+        rebuildContextMenu()
+        refreshConfiguration()
+        defer {
+            refreshingProjectURLs.remove(project.url)
+            rebuildContextMenu()
+            refreshConfiguration()
+        }
+        let resolver = schemeResolver
+        for configuration in project.enabledConfigurations {
+            do {
+                let destinations = try await Task.detached(priority: .userInitiated) {
+                    try resolver.destinations(
+                        for: project.url, kind: project.kind, scheme: configuration.scheme
+                    )
+                }.value
+                guard let index = projectCatalog?.projects.firstIndex(where: { $0.url == project.url }),
+                      projectCatalog?.projects[index].enabledConfigurations.contains(where: {
+                          $0.scheme == configuration.scheme
+                      }) == true else {
+                    continue
+                }
+                projectCatalog?.updateDestinations(destinations, scheme: configuration.scheme, forProjectAt: index)
+                onCatalogChange?()
+            } catch {
+                destinationRefreshErrors[project.url, default: []].insert(configuration.scheme)
+            }
+        }
+    }
+
+    private func rebuildContextMenu() {
+        // Replacing the row while its submenu is tracking would dismiss the picker.
+        guard destinationMenuParent == nil else {
+            deferredMenuRefresh = true
+            return
+        }
+        let menu = contextMenu
+        let replacement = makeContextMenu()
+        menu.removeAllItems()
+        for item in replacement.items {
+            replacement.removeItem(item)
+            menu.addItem(item)
+        }
+    }
+
+    private var destinationsAreReady: Bool {
+        guard let project = projectCatalog?.selectedProject else { return false }
+        let selectionFailed = project.selectedLaunchConfiguration.map {
+            destinationRefreshErrors[project.url]?.contains($0.scheme) == true
+        } ?? false
+        return !refreshingProjectURLs.contains(project.url) && !selectionFailed
     }
 
     func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) {
@@ -590,7 +691,9 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         let row = MenuDetailItemView(
             title: scheme,
             detail: destination,
-            selection: isSelectedForPlay
+            selection: isSelectedForPlay,
+            showsChevron: false,
+            trailingAccessoryWidth: 78
         )
         row.addConfigurationActions(
             target: self,
@@ -676,7 +779,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     private func updateLaunchButtons() {
-        let canStart = !isRunning && projectCatalog?.selectedProject?
+        let canStart = !isRunning && destinationsAreReady && projectCatalog?.selectedProject?
             .selectedLaunchConfiguration?.isSelectedDestinationAvailable == true
         let canStop = isRunning && activeLauncher != nil
         playMenuItem?.isEnabled = canStart || canStop
@@ -757,12 +860,22 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         )
         item.target = self
         item.isEnabled = true
-        item.view = MenuDetailItemView(
-            title: "Quit",
-            detail: "⌘Q",
-            showsChevron: false
-        )
         item.setAccessibilityLabel("Quit, Command Q")
+        let row = MenuDetailItemView(title: "Quit", detail: "⌘Q", showsChevron: false)
+        let button = NSButton(title: "", target: self, action: #selector(quitApplication))
+        button.identifier = NSUserInterfaceItemIdentifier("quit-button")
+        button.isBordered = false
+        button.isTransparent = true
+        button.setAccessibilityLabel("Quit")
+        button.translatesAutoresizingMaskIntoConstraints = false
+        row.addSubview(button)
+        NSLayoutConstraint.activate([
+            button.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            button.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+            button.topAnchor.constraint(equalTo: row.topAnchor),
+            button.bottomAnchor.constraint(equalTo: row.bottomAnchor),
+        ])
+        item.view = row
         return item
     }
 
@@ -914,6 +1027,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     init(
         projectCatalog: ProjectCatalog? = nil,
         appSettings: AppSettings? = nil,
+        schemeResolver: XcodeSchemeResolver = XcodeSchemeResolver(),
         onEditProjects: (() -> Void)? = nil,
         onCatalogChange: (() -> Void)? = nil,
         confirmMacroAcceptance: (() -> Bool)? = nil,
@@ -931,11 +1045,13 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         openExternalURL: @escaping (URL) -> Void = { url in
             NSWorkspace.shared.open(url)
         },
-        presentDestinationMenu: @escaping (NSMenu, NSPoint) -> Void = { menu, point in
-            menu.popUp(positioning: nil, at: point, in: nil)
+        terminateApplication: @escaping @MainActor () -> Void = { NSApp.terminate(nil) },
+        openDestinationSubmenu: @escaping (NSMenuItem) -> Void = { item in
+            item.accessibilityPerformPress()
         }
     ) {
         self.projectCatalog = projectCatalog
+        self.schemeResolver = schemeResolver
         self.appSettings = appSettings ?? AppSettings()
         self.onEditProjects = onEditProjects
         self.onCatalogChange = onCatalogChange
@@ -945,7 +1061,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         self.presentLaunchFailures = presentLaunchFailures ?? Self.presentDefaultLaunchFailures
         self.appVersion = appVersion
         self.openExternalURL = openExternalURL
-        self.presentDestinationMenu = presentDestinationMenu
+        self.terminateApplication = terminateApplication
+        self.openDestinationSubmenu = openDestinationSubmenu
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItemView = StatusItemView()
 
@@ -1049,6 +1166,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private func startProject() {
         guard
             !isRunning,
+            destinationsAreReady,
             let project = projectCatalog?.selectedProject,
             let configuration = project.selectedLaunchConfiguration,
             let plan = XcodeProjectLaunchPlan.make(
@@ -1142,7 +1260,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     @objc
     private func quitApplication() {
-        NSApp.terminate(nil)
+        contextMenu.cancelTracking()
+        terminateApplication()
     }
 
     @objc
@@ -1157,6 +1276,9 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         onCatalogChange?()
         contextMenu = makeContextMenu()
         refreshConfiguration()
+        Task { [weak self] in
+            await self?.refreshDestinations()
+        }
     }
 
     @objc
@@ -1212,16 +1334,14 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     @objc
     private func showDestinationMenu(_ button: NSButton) {
-        guard let menu = button.menu else {
-            return
-        }
-        let windowPoint = button.convert(
-            NSPoint(x: button.bounds.maxX + 4, y: button.bounds.maxY),
-            to: nil
-        )
-        let screenPoint = button.window?.convertPoint(toScreen: windowPoint) ?? .zero
-        contextMenu.cancelTracking()
-        presentDestinationMenu(menu, screenPoint)
+        guard let menu = button.menu, let item = button.enclosingMenuItem else { return }
+        destinationMenuParent?.submenu = nil
+        destinationMenuParent = item
+        menu.delegate = self
+        item.submenu = menu
+        // Attach only for device selection; otherwise AppKit takes over the whole
+        // row and prevents the independent scheme button from receiving clicks.
+        openDestinationSubmenu(item)
     }
 
     private func finishCatalogSelection() {
@@ -1277,10 +1397,15 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         let project = projectCatalog?.selectedProject
         let configuration = project?.selectedLaunchConfiguration
         let destination = activeLaunchPlan?.destination ?? configuration?.selectedDestination
-        let canStart = configuration?.isSelectedDestinationAvailable == true
+        let canStart = destinationsAreReady && configuration?.isSelectedDestinationAvailable == true
         let description: String
         if let plan = activeLaunchPlan {
             description = "Building and launching \(plan.scheme)…"
+        } else if let url = project?.url, refreshingProjectURLs.contains(url) {
+            description = "Refreshing destinations…"
+        } else if let url = project?.url, let configuration,
+                  destinationRefreshErrors[url]?.contains(configuration.scheme) == true {
+            description = "Could not refresh destinations. Reopen menu to retry."
         } else if canStart {
             description = "Start project"
         } else if configuration != nil {
