@@ -161,6 +161,10 @@ final class StatusBarControllerTests: XCTestCase {
             XCTAssertEqual(stop.title, "")
             XCTAssertEqual(stop.imagePosition, .imageOnly)
             XCTAssertEqual(stop.accessibilityLabel(), "Stop")
+            XCTAssertLessThan(
+                stop.contentCompressionResistancePriority(for: .horizontal),
+                .required
+            )
             XCTAssertTrue(spinner.isHidden)
             XCTAssertFalse(play.isEnabled)
             XCTAssertFalse(stop.isEnabled)

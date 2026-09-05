@@ -630,7 +630,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         stopButton.imagePosition = .imageOnly
         stopButton.setAccessibilityLabel("Stop")
         stopButton.setContentHuggingPriority(.required, for: .horizontal)
-        stopButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+        stopButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let buttons = NSStackView(views: [playButton, stopButton])
         buttons.orientation = .horizontal
