@@ -8,6 +8,21 @@
 XPlay is a macOS menu bar app for building and launching Xcode projects without
 keeping Xcode open.
 
+## Install
+
+Install XPlay from the MobilePur Homebrew tap:
+
+```sh
+brew install --cask mobilepur/tap/xplay
+```
+
+Upgrade or uninstall it with:
+
+```sh
+brew upgrade --cask xplay
+brew uninstall --cask xplay
+```
+
 The menu bar appearance is configurable in **Settings → Menu Bar Icon**:
 
 - **XPlay** — the X-and-Play icon (default).
@@ -19,10 +34,11 @@ When the chosen content is unavailable, XPlay falls back to its icon. Long proje
 names are truncated. Three animated dots appear underneath while a configuration
 is building and launching.
 
-The menu shows enabled schemes and their selected destinations, a large **Run Project**
-button, saved XPlay Projects, and global settings. The Run Project button builds and launches
-the selected configuration; it is disabled during a launch or without an available
-destination. **Left Click** and **Right Click** can each be set to **Play** or **Menu**.
+The menu shows enabled schemes and their selected destinations, **Run Project** and
+**Stop** controls, saved XPlay Projects, and global settings. Run Project builds and
+launches the selected configuration; it is disabled during a launch or without an
+available destination. A spinner remains visible during launch, while Stop cancels
+the active operation. **Left Click** and **Right Click** can each be set to **Play** or **Menu**.
 The current value appears in gray beside each setting's chevron. By default, left
 click starts Play and right click opens the menu. The actions are always paired:
 changing either click swaps the other, so one runs the project and the other opens
@@ -40,6 +56,8 @@ menu makes it active.
 **Accept Macros** is global, defaults to off, and requires confirmation before XPlay
 adds `-skipMacroValidation` to builds.
 Every configuration has its own build log.
+
+See [Release Notes](docs/RELEASE_NOTES.md) for version history.
 
 ## Requirements
 

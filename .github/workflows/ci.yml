@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Test
+        run: |
+          xcodebuild test -quiet \
+            -project XPlay.xcodeproj \
+            -scheme XPlay \
+            -destination 'platform=macOS' \
+            -derivedDataPath /tmp/XPlayCIDerivedData
+      - name: Test development launcher
+        run: sh ScriptsTests/launch-dev-test.sh
+      - name: Test release workflow
+        run: bash Tests/PackagingTests/ReleaseWorkflowTests.sh
+      - name: Test release package
+        run: bash Tests/PackagingTests/ReleasePackageTests.sh

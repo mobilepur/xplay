@@ -6,16 +6,16 @@ without keeping Xcode open.
 ## Language
 
 **XPlay Project**:
-A developer-defined application group anchored by one Xcode workspace and containing
+A developer-defined application group anchored by one Xcode container and containing
 one or more launch configurations.
 _Avoid_: Xcode project, saved project
 
-**Workspace**:
-The `.xcworkspace` container from which XPlay discovers schemes.
-_Avoid_: Project file, container
+**Xcode Container**:
+The `.xcodeproj` or `.xcworkspace` container from which XPlay discovers schemes.
+_Avoid_: Project file, workspace when either container type is possible
 
 **Scheme**:
-A named Xcode build-and-run definition discovered from a workspace.
+A named Xcode build-and-run definition discovered from an Xcode container.
 _Avoid_: Target
 
 **Destination**:
