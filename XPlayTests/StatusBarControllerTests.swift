@@ -574,11 +574,14 @@ final class StatusBarControllerTests: XCTestCase {
             let destinationButton = try XCTUnwrap(buttons.first {
                 $0.identifier?.rawValue == "destination-menu-button"
             })
-            XCTAssertEqual(schemeButton.frame.maxX + 4, destinationButton.frame.minX, accuracy: 0.5)
+            // AppKit's button frame includes different shadow insets across macOS
+            // versions. Auto Layout positions the visible alignment rectangle.
+            let destinationRect = destinationButton.alignmentRect(forFrame: destinationButton.frame)
+            XCTAssertEqual(schemeButton.frame.maxX + 4, destinationRect.minX, accuracy: 0.5)
             XCTAssertTrue(schemeButton.frame.contains(
                 NSPoint(x: schemeLabel.frame.midX, y: schemeLabel.frame.midY)
             ))
-            XCTAssertGreaterThanOrEqual(destinationButton.frame.minX, destinationLabel.frame.maxX + 4)
+            XCTAssertGreaterThanOrEqual(destinationRect.minX, destinationLabel.frame.maxX + 4)
             XCTAssertEqual(destinationButton.title, "Change…")
             XCTAssertNil(item.submenu)
             XCTAssertEqual(
@@ -690,7 +693,8 @@ final class StatusBarControllerTests: XCTestCase {
             let changeButton = try XCTUnwrap(row.subviews.compactMap { $0 as? NSButton }.first {
                 $0.identifier?.rawValue == "destination-menu-button"
             })
-            XCTAssertGreaterThanOrEqual(changeButton.frame.minX, deviceLabel.frame.maxX + 4)
+            let changeRect = changeButton.alignmentRect(forFrame: changeButton.frame)
+            XCTAssertGreaterThanOrEqual(changeRect.minX, deviceLabel.frame.maxX + 4)
             let devicePoint = NSPoint(x: changeButton.frame.midX, y: row.bounds.midY)
             let deviceHit = try XCTUnwrap(row.hitTest(devicePoint) as? NSButton)
             XCTAssertEqual(deviceHit.identifier?.rawValue, "destination-menu-button")
