@@ -44,7 +44,9 @@ grep -Fq 'url "https://github.com/mobilepur/xplay/releases/download/v#{version}/
 grep -Fq 'app "XPlay.app"' "$generated_cask"
 grep -Fq 'quit: "de.mobilepur.XPlay"' "$generated_cask"
 grep -Fq '"~/Library/Caches/XPlay"' "$generated_cask"
-grep -Fq 'system_command "/usr/bin/xattr"' "$generated_cask"
+grep -Fq "postflight_steps do" "$generated_cask"
+grep -Fq 'run "/usr/bin/xattr"' "$generated_cask"
+! grep -Fq "postflight do" "$generated_cask"
 ! grep -Fq 'version :latest' "$generated_cask"
 ! grep -Fq 'sha256 :no_check' "$generated_cask"
 

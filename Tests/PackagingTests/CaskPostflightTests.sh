@@ -10,4 +10,6 @@ generated_cask="$temporary_root/xplay.rb"
 checksum="$(printf '%064d' 0)"
 
 bash "$repository_root/Scripts/render-homebrew-cask.sh" 1.0.0 "$checksum" > "$generated_cask"
+grep -Fq "postflight_steps do" "$generated_cask"
+! grep -Fq "postflight do" "$generated_cask"
 ruby "$repository_root/Tests/PackagingTests/CaskPostflightTests.rb" "$generated_cask" "$temporary_root"
