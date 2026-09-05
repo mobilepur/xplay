@@ -26,7 +26,7 @@ jobs:
 
       - name: Test
         run: |
-          xcodebuild test -quiet \
+          xcodebuild test \
             -project XPlay.xcodeproj \
             -scheme XPlay \
             -destination 'platform=macOS' \
