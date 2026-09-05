@@ -37,6 +37,7 @@ final class XcodeProjectLauncher: ProjectLaunching, @unchecked Sendable {
         case ambiguousApplicationProducts([String])
         case simulatorCommandFailed(command: String, status: Int32, logURL: URL)
         case bundleIdentifierMissing(URL)
+        case applicationTerminationFailed(URL)
 
         var errorDescription: String? {
             switch self {
@@ -54,6 +55,8 @@ final class XcodeProjectLauncher: ProjectLaunching, @unchecked Sendable {
                 return "Xcode build settings contained multiple application products: \(products.joined(separator: ", "))."
             case let .simulatorCommandFailed(command, status, logURL):
                 return "\(command) failed with status \(status). See \(logURL.path) for details."
+            case let .applicationTerminationFailed(url):
+                return "The running app could not be closed: \(url.path). Quit it and try Play again."
             case let .bundleIdentifierMissing(url):
                 return "The built app has no bundle identifier: \(url.path)"
             }
@@ -111,26 +114,8 @@ final class XcodeProjectLauncher: ProjectLaunching, @unchecked Sendable {
                 try throwIfCancelled()
                 switch plan.destination.platform {
                 case .macOS:
-                    DispatchQueue.main.async { [weak self, openMacApplication] in
-                        guard let self else {
-                            completion(.failure(CancellationError()))
-                            return
-                        }
-                        do {
-                            try self.throwIfCancelled()
-                        } catch {
-                            completion(.failure(error))
-                            return
-                        }
-                        openMacApplication(appURL) { error in
-                            if let error {
-                                completion(.failure(error))
-                            } else if self.cancellationRequested {
-                                completion(.failure(CancellationError()))
-                            } else {
-                                completion(.success(appURL))
-                            }
-                        }
+                    DispatchQueue.main.async { [self] in
+                        restartMacApplication(at: appURL, completion: completion)
                     }
                 case .iOSSimulator:
                     try launchOnSimulator(appURL)
@@ -138,6 +123,69 @@ final class XcodeProjectLauncher: ProjectLaunching, @unchecked Sendable {
                 }
             } catch {
                 completion(.failure(error))
+            }
+        }
+    }
+
+    private func restartMacApplication(
+        at appURL: URL,
+        completion: @escaping @Sendable (Result<URL, Error>) -> Void
+    ) {
+        let canonicalURL = appURL.resolvingSymlinksInPath().standardizedFileURL
+        let runningApplications = NSWorkspace.shared.runningApplications.filter {
+            $0.bundleURL?.resolvingSymlinksInPath().standardizedFileURL == canonicalURL
+                && !$0.isTerminated
+        }
+        do {
+            for application in runningApplications {
+                try throwIfCancelled()
+                guard application.terminate() || application.isTerminated else {
+                    throw LaunchError.applicationTerminationFailed(appURL)
+                }
+            }
+        } catch {
+            completion(.failure(error))
+            return
+        }
+        // A normal quit can be delayed by a save dialog. Never force it or open
+        // a second copy while the previous executable is still running.
+        openMacApplicationAfterTermination(
+            runningApplications,
+            appURL: appURL,
+            deadline: ProcessInfo.processInfo.systemUptime + 10,
+            completion: completion
+        )
+    }
+
+    private func openMacApplicationAfterTermination(
+        _ applications: [NSRunningApplication],
+        appURL: URL,
+        deadline: TimeInterval,
+        completion: @escaping @Sendable (Result<URL, Error>) -> Void
+    ) {
+        guard !cancellationRequested else {
+            completion(.failure(CancellationError()))
+            return
+        }
+        if applications.contains(where: { !$0.isTerminated }) {
+            guard ProcessInfo.processInfo.systemUptime < deadline else {
+                completion(.failure(LaunchError.applicationTerminationFailed(appURL)))
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [self] in
+                openMacApplicationAfterTermination(
+                    applications, appURL: appURL, deadline: deadline, completion: completion
+                )
+            }
+            return
+        }
+        openMacApplication(appURL) { [self] error in
+            if let error {
+                completion(.failure(error))
+            } else if cancellationRequested {
+                completion(.failure(CancellationError()))
+            } else {
+                completion(.success(appURL))
             }
         }
     }
@@ -322,13 +370,13 @@ final class XcodeProjectLauncher: ProjectLaunching, @unchecked Sendable {
         throw LaunchError.applicationProductMissing
     }
 
-    private static func openApplication(
+    static func openApplication(
         at applicationURL: URL,
         completion: @escaping @Sendable (Error?) -> Void
     ) {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
-        configuration.createsNewApplicationInstance = false
+        configuration.createsNewApplicationInstance = true
         NSWorkspace.shared.openApplication(
             at: applicationURL,
             configuration: configuration

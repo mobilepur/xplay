@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 struct XcodeProjectLaunchPlan: Equatable {
@@ -60,9 +61,9 @@ extension XcodeProjectLaunchPlan {
         else {
             return nil
         }
-        let filenameScheme = configuration.scheme
-            .replacingOccurrences(of: "/", with: "-")
-            .replacingOccurrences(of: ":", with: "-")
+        let identity = project.url.standardizedFileURL.path + "\0" + configuration.scheme
+        let storageKey = SHA256.hash(data: Data(identity.utf8))
+            .map { String(format: "%02x", $0) }.joined()
         return Self(
             containerURL: project.url,
             containerKind: project.kind,
@@ -70,12 +71,11 @@ extension XcodeProjectLaunchPlan {
             destination: destination,
             derivedDataURL: cacheDirectory
                 .appendingPathComponent("DerivedData", isDirectory: true)
-                .appendingPathComponent(project.name, isDirectory: true)
-                .appendingPathComponent(filenameScheme, isDirectory: true),
+                .appendingPathComponent(storageKey, isDirectory: true),
             logURL: cacheDirectory
                 .appendingPathComponent("Logs", isDirectory: true)
                 .appendingPathComponent(
-                    "\(project.name)-\(filenameScheme)-build.log"
+                    "\(storageKey)-build.log"
                 ),
             productName: project.name,
             acceptsMacros: acceptsMacros

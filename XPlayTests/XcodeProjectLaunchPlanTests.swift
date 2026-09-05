@@ -62,15 +62,34 @@ final class XcodeProjectLaunchPlanTests: XCTestCase {
         ))
 
         XCTAssertEqual(plan.scheme, "Example-iOS")
-        XCTAssertEqual(
-            plan.derivedDataURL.path,
-            "/Caches/XPlay/DerivedData/Example/Example-iOS"
-        )
-        XCTAssertEqual(
-            plan.logURL.path,
-            "/Caches/XPlay/Logs/Example-Example-iOS-build.log"
-        )
+        XCTAssertEqual(plan.derivedDataURL.deletingLastPathComponent().path, "/Caches/XPlay/DerivedData")
+        XCTAssertEqual(plan.logURL.deletingLastPathComponent().path, "/Caches/XPlay/Logs")
         XCTAssertTrue(plan.acceptsMacros)
+    }
+
+    func testStoragePathsAreStableAndIsolateContainersAndSchemes() throws {
+        let mac = XcodeDestination(platform: .macOS, id: "mac", name: "My Mac")
+        func plan(path: String, scheme: String = "Example") throws -> XcodeProjectLaunchPlan {
+            let configuration = LaunchConfiguration(
+                scheme: scheme, isEnabled: true,
+                availableDestinations: [mac], selectedDestinationID: mac.id
+            )
+            return try XCTUnwrap(XcodeProjectLaunchPlan.make(
+                for: SavedProject(url: URL(fileURLWithPath: path), kind: .project),
+                configuration: configuration,
+                cacheDirectory: URL(fileURLWithPath: "/Caches/XPlay"), acceptsMacros: false
+            ))
+        }
+        let main = try plan(path: "/repos/main/Example.xcodeproj")
+        let other = try plan(path: "/repos/feature/Example.xcodeproj")
+        XCTAssertNotEqual(main.derivedDataURL, other.derivedDataURL)
+        XCTAssertNotEqual(main.logURL, other.logURL)
+        XCTAssertEqual(main, try plan(path: "/repos/main/Example.xcodeproj"))
+        XCTAssertEqual(main, try plan(path: "/repos/main/../main/Example.xcodeproj"))
+        let slash = try plan(path: "/repos/main/Example.xcodeproj", scheme: "App/iOS")
+        let colon = try plan(path: "/repos/main/Example.xcodeproj", scheme: "App:iOS")
+        XCTAssertNotEqual(slash.derivedDataURL, colon.derivedDataURL)
+        XCTAssertNotEqual(slash.logURL, colon.logURL)
     }
 
     private func makePlan(

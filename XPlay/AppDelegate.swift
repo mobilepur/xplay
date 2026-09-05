@@ -23,5 +23,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.projectWindowController.refreshFromCatalog()
             }
         )
+        Task { [weak self] in
+            await self?.statusBarController?.refreshDestinations()
+        }
     }
 }

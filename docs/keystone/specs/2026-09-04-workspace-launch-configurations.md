@@ -15,19 +15,19 @@ macOS and iOS applications together without keeping Xcode open.
 
 ### XPlay Projects and workspaces
 
-- One XPlay Project is anchored by one `.xcworkspace`.
-- `Add Workspace…` opens Finder and accepts an Xcode workspace bundle.
+- One XPlay Project is anchored by one `.xcworkspace` or `.xcodeproj`.
+- `Add Project…` opens Finder and accepts either Xcode container type.
 - XPlay discovers the workspace's schemes and displays them as a checklist.
 - Enabling a scheme creates one launch configuration for that scheme.
-- Existing `.xcodeproj` records remain readable as legacy single-container projects
-  until the developer replaces them with a workspace.
+- Existing `.xcodeproj` records remain readable without requiring migration to a workspace.
 
 ### Destinations
 
 - Each enabled scheme owns its own destination selection.
 - The status menu lists every enabled scheme beneath the selected XPlay Project.
-- Each scheme has a destination submenu containing only concrete destinations supported
-  by that scheme.
+- Each scheme has a separate Change button to the right of its destination. It opens
+  a destination submenu containing only concrete destinations supported by that scheme,
+  while the main menu remains visible. The scheme area independently selects it for Play.
 - Exactly one enabled scheme is selected for Play per XPlay Project and is marked with a
   checkmark in the status menu.
 - Choosing a scheme for Play, or choosing one of its destinations, persists that scheme
@@ -63,7 +63,7 @@ macOS and iOS applications together without keeping Xcode open.
 ## UX states
 
 - **Empty:** With no XPlay Project, Play is disabled and the menu directs the developer
-  to add a workspace.
+  to add a project or workspace.
 - **Loading:** Scheme or destination discovery displays an inline loading state without
   hiding already persisted configuration.
 - **Incomplete:** An enabled scheme without an available selected destination displays

@@ -355,11 +355,47 @@ final class StatusBarControllerTests: XCTestCase {
         XCTAssertEqual(quit.keyEquivalent, "q")
         XCTAssertNotEqual(quit.action, #selector(NSApplication.terminate(_:)))
         XCTAssertNil(quit.image)
-        let quitRow = try XCTUnwrap(quit.view)
-        XCTAssertTrue(quitRow.subviews.compactMap { $0 as? NSImageView }.allSatisfy(\.isHidden))
-        XCTAssertTrue(quitRow.subviews.compactMap { $0 as? NSTextField }.contains {
-            $0.stringValue == "⌘Q" && $0.textColor == .secondaryLabelColor
+    }
+
+    @MainActor
+    func testQuitRespondsToCommandQAndMenuActivation() throws {
+        var quitCount = 0
+        let controller = StatusBarController(terminateApplication: { quitCount += 1 })
+        let menu = controller.contextMenu
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [.command],
+            timestamp: 0, windowNumber: 0, context: nil,
+            characters: "q", charactersIgnoringModifiers: "q", isARepeat: false, keyCode: 12
+        ))
+        XCTAssertTrue(menu.performKeyEquivalent(with: event))
+        XCTAssertEqual(quitCount, 1)
+        let item = try XCTUnwrap(menu.items.first { $0.title == "Quit" })
+        menu.performActionForItem(at: menu.index(of: item))
+        XCTAssertEqual(quitCount, 2)
+    }
+
+    @MainActor
+    func testQuitAlignsWithLinksAndEntireRowRemainsClickable() throws {
+        var quitCount = 0
+        let controller = StatusBarController(terminateApplication: { quitCount += 1 })
+        let row = try XCTUnwrap(controller.contextMenu.items.first { $0.title == "Quit" }?.view)
+        let linkRow = try XCTUnwrap(controller.contextMenu.items.first { $0.title == "Report a Problem…" }?.view)
+        for view in [row, linkRow] {
+            view.frame.size.width = 400
+            view.layoutSubtreeIfNeeded()
+        }
+        let quitLabel = try XCTUnwrap(row.subviews.compactMap { $0 as? NSTextField }.first {
+            $0.stringValue == "Quit"
         })
+        let linkLabel = try XCTUnwrap(linkRow.subviews.compactMap { $0 as? NSTextField }.first {
+            $0.stringValue == "Report a Problem…"
+        })
+        XCTAssertEqual(quitLabel.frame.minX, linkLabel.frame.minX, accuracy: 0.5)
+        for x in [quitLabel.frame.midX, row.bounds.maxX - 15] {
+            let button = try XCTUnwrap(row.hitTest(NSPoint(x: x, y: row.bounds.midY)) as? NSButton)
+            button.performClick(nil)
+        }
+        XCTAssertEqual(quitCount, 2)
     }
 
     @MainActor
@@ -490,7 +526,7 @@ final class StatusBarControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testConfigurationRowsUseFlexibleSchemeDestinationAndChevronLayout() throws {
+    func testConfigurationRowsKeepChangeButtonSeparateFromSchemeAndDestination() throws {
         try withState { catalog, settings in
             let simulator = XcodeDestination(
                 platform: .iOSSimulator,
@@ -525,21 +561,12 @@ final class StatusBarControllerTests: XCTestCase {
             )
             row.frame.size.width = 360
             row.layoutSubtreeIfNeeded()
-            let destinationAlignmentRect = destinationLabel.alignmentRect(
-                forFrame: destinationLabel.frame
-            )
-            let chevronAlignmentRect = chevron.alignmentRect(forFrame: chevron.frame)
 
             XCTAssertNil(item.attributedTitle)
             XCTAssertEqual(destinationLabel.textColor, .secondaryLabelColor)
             XCTAssertFalse(checkmark.isHidden)
             XCTAssertLessThan(schemeLabel.frame.maxX, destinationLabel.frame.minX)
-            XCTAssertEqual(
-                chevronAlignmentRect.minX - destinationAlignmentRect.maxX,
-                8,
-                accuracy: 0.5
-            )
-            XCTAssertEqual(row.frame.maxX - chevron.frame.maxX, 12, accuracy: 0.5)
+            XCTAssertTrue(chevron.isHidden)
             let buttons = descendants(of: row).compactMap { $0 as? NSButton }
             let schemeButton = try XCTUnwrap(buttons.first {
                 $0.identifier?.rawValue == "scheme-selection-button"
@@ -547,16 +574,12 @@ final class StatusBarControllerTests: XCTestCase {
             let destinationButton = try XCTUnwrap(buttons.first {
                 $0.identifier?.rawValue == "destination-menu-button"
             })
-            XCTAssertEqual(schemeButton.frame.maxX, destinationButton.frame.minX, accuracy: 0.5)
+            XCTAssertEqual(schemeButton.frame.maxX + 4, destinationButton.frame.minX, accuracy: 0.5)
             XCTAssertTrue(schemeButton.frame.contains(
                 NSPoint(x: schemeLabel.frame.midX, y: schemeLabel.frame.midY)
             ))
-            XCTAssertTrue(destinationButton.frame.contains(
-                NSPoint(x: destinationLabel.frame.midX, y: destinationLabel.frame.midY)
-            ))
-            XCTAssertTrue(destinationButton.frame.contains(
-                NSPoint(x: chevron.frame.midX, y: chevron.frame.midY)
-            ))
+            XCTAssertGreaterThanOrEqual(destinationButton.frame.minX, destinationLabel.frame.maxX + 4)
+            XCTAssertEqual(destinationButton.title, "Change…")
             XCTAssertNil(item.submenu)
             XCTAssertEqual(
                 item.accessibilityLabel(),
@@ -648,6 +671,115 @@ final class StatusBarControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testConfigurationRowRoutesClicksByVisibleSchemeAndDeviceRegions() async throws {
+        try await withState { catalog, settings in
+            let mac = XcodeDestination(platform: .macOS, id: "mac", name: "My Mac")
+            let phone = XcodeDestination(platform: .iOSSimulator, id: "phone", name: "iPhone 17 Pro (26.3.1)")
+            configure(catalog, schemes: ["Earnie-macOS", "Earnie-iOS"], destinations: [[mac], [phone]])
+            var presentedMenus: [NSMenu] = []
+            let opened = expectation(description: "Device picker opened")
+            let controller = StatusBarController(
+                projectCatalog: catalog, appSettings: settings,
+                openDestinationSubmenu: { item in presentedMenus.append(item.submenu!); opened.fulfill() }
+            )
+            let row = try XCTUnwrap(controller.contextMenu.items.first { $0.title == "Earnie-iOS" }?.view)
+            row.frame = NSRect(x: 0, y: 0, width: 600, height: 28)
+            row.layoutSubtreeIfNeeded()
+            let labels = row.subviews.compactMap { $0 as? NSTextField }
+            let deviceLabel = try XCTUnwrap(labels.first { $0.stringValue == phone.name })
+            let changeButton = try XCTUnwrap(row.subviews.compactMap { $0 as? NSButton }.first {
+                $0.identifier?.rawValue == "destination-menu-button"
+            })
+            XCTAssertGreaterThanOrEqual(changeButton.frame.minX, deviceLabel.frame.maxX + 4)
+            let devicePoint = NSPoint(x: changeButton.frame.midX, y: row.bounds.midY)
+            let deviceHit = try XCTUnwrap(row.hitTest(devicePoint) as? NSButton)
+            XCTAssertEqual(deviceHit.identifier?.rawValue, "destination-menu-button")
+            deviceHit.performClick(nil)
+            await fulfillment(of: [opened], timeout: 2)
+            XCTAssertEqual(presentedMenus.count, 1)
+            XCTAssertEqual(catalog.selectedProject?.selectedLaunchConfiguration?.scheme, "Earnie-macOS")
+
+            let schemeLabel = try XCTUnwrap(labels.first { $0.stringValue == "Earnie-iOS" })
+            let schemeHit = try XCTUnwrap(row.hitTest(NSPoint(x: schemeLabel.frame.midX, y: row.bounds.midY)) as? NSButton)
+            XCTAssertEqual(schemeHit.identifier?.rawValue, "scheme-selection-button")
+            schemeHit.performClick(nil)
+            XCTAssertEqual(catalog.selectedProject?.selectedLaunchConfiguration?.scheme, "Earnie-iOS")
+            XCTAssertEqual(presentedMenus.count, 1)
+        }
+    }
+
+    @MainActor
+    func testDevicePickerRemainsAttachedToMainMenuAndDetachesAfterDismissal() throws {
+        try withState { catalog, settings in
+            let mac = XcodeDestination(platform: .macOS, id: "mac", name: "My Mac")
+            let phone = XcodeDestination(platform: .iOSSimulator, id: "phone", name: "iPhone 17 Pro")
+            configure(catalog, schemes: ["Earnie-macOS", "Earnie-iOS"], destinations: [[mac], [phone]])
+            var openedItems: [NSMenuItem] = []
+            let controller = StatusBarController(
+                projectCatalog: catalog, appSettings: settings,
+                openDestinationSubmenu: { item in openedItems.append(item) }
+            )
+            let mainMenu = controller.contextMenu
+            let item = try XCTUnwrap(mainMenu.items.first { $0.title == "Earnie-iOS" })
+            let row = try XCTUnwrap(item.view)
+            let button = try XCTUnwrap(descendants(of: row).compactMap { $0 as? NSButton }.first {
+                $0.identifier?.rawValue == "destination-menu-button"
+            })
+            XCTAssertEqual(button.title, "Change…")
+            XCTAssertNil(item.submenu)
+            button.performClick(nil)
+            let submenu = try XCTUnwrap(item.submenu)
+            XCTAssertTrue(openedItems.first === item)
+            XCTAssertTrue(submenu.supermenu === mainMenu, "The picker must belong to the open main menu")
+            XCTAssertEqual(submenu.items.map(\.title), ["iPhone 17 Pro"])
+            XCTAssertEqual(catalog.selectedProject?.selectedLaunchConfiguration?.scheme, "Earnie-macOS")
+
+            submenu.delegate?.menuDidClose?(submenu)
+            XCTAssertNil(item.submenu, "Dismissing the picker must restore independent row actions")
+            button.performClick(nil)
+            XCTAssertEqual(openedItems.count, 2)
+            XCTAssertTrue(item.submenu === submenu)
+        }
+    }
+
+    @MainActor
+    func testDestinationRefreshKeepsOpenPickerRowUntilDismissal() async throws {
+        try await withState { catalog, settings in
+            let phone = XcodeDestination(platform: .iOSSimulator, id: "phone", name: "iPhone 17")
+            configure(catalog, schemes: ["Example-iOS"], destinations: [[phone]])
+            let controller = StatusBarController(
+                projectCatalog: catalog,
+                appSettings: settings,
+                schemeResolver: XcodeSchemeResolver { _ in
+                    Data("{ platform:iOS Simulator, id:new-phone, name:iPhone 17 Pro }".utf8)
+                },
+                openDestinationSubmenu: { _ in }
+            )
+            let mainMenu = controller.contextMenu
+            let item = try XCTUnwrap(mainMenu.items.first { $0.title == "Example-iOS" })
+            let row = try XCTUnwrap(item.view)
+            let button = try XCTUnwrap(descendants(of: row).compactMap { $0 as? NSButton }.first {
+                $0.identifier?.rawValue == "destination-menu-button"
+            })
+            button.performClick(nil)
+            let submenu = try XCTUnwrap(item.submenu)
+            await controller.refreshDestinations()
+            XCTAssertTrue(mainMenu.items.contains { $0 === item })
+            XCTAssertTrue(item.submenu === submenu)
+            XCTAssertTrue(submenu.supermenu === mainMenu)
+            XCTAssertEqual(submenu.items.map(\.title), ["iPhone 17"])
+
+            submenu.delegate?.menuDidClose?(submenu)
+            let refreshedItem = try XCTUnwrap(mainMenu.items.first { $0.title == "Example-iOS" })
+            XCTAssertFalse(refreshedItem === item)
+            let refreshedButton = try XCTUnwrap(descendants(of: refreshedItem.view!).compactMap { $0 as? NSButton }.first {
+                $0.identifier?.rawValue == "destination-menu-button"
+            })
+            XCTAssertTrue(refreshedButton.menu!.items.contains { $0.title == "iPhone 17 Pro" })
+        }
+    }
+
+    @MainActor
     func testSelectingSchemeForPlayUpdatesMenuSelection() throws {
         try withState { catalog, settings in
             let mac = XcodeDestination(platform: .macOS, id: "mac", name: "My Mac")
@@ -665,7 +797,7 @@ final class StatusBarControllerTests: XCTestCase {
             let controller = StatusBarController(
                 projectCatalog: catalog,
                 appSettings: settings,
-                presentDestinationMenu: { _, _ in
+                openDestinationSubmenu: { _ in
                     presentedDeviceMenuCount += 1
                 }
             )
@@ -694,8 +826,8 @@ final class StatusBarControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testSelectingDestinationFromRightSideMenuPersistsSelection() throws {
-        try withState { catalog, settings in
+    func testSelectingDestinationFromRightSideMenuPersistsSelection() async throws {
+        try await withState { catalog, settings in
             let first = XcodeDestination(
                 platform: .iOSSimulator,
                 id: "first",
@@ -708,11 +840,13 @@ final class StatusBarControllerTests: XCTestCase {
             )
             configure(catalog, schemes: ["Example-iOS"], destinations: [[first, second]])
             var presentedMenu: NSMenu?
+            let opened = expectation(description: "Device picker opened")
             let controller = StatusBarController(
                 projectCatalog: catalog,
                 appSettings: settings,
-                presentDestinationMenu: { menu, _ in
-                    presentedMenu = menu
+                openDestinationSubmenu: { item in
+                    presentedMenu = item.submenu
+                    opened.fulfill()
                 }
             )
             let schemeItem = try XCTUnwrap(
@@ -726,6 +860,7 @@ final class StatusBarControllerTests: XCTestCase {
             )
 
             destinationButton.performClick(nil)
+            await fulfillment(of: [opened], timeout: 2)
 
             let submenu = try XCTUnwrap(presentedMenu)
             let secondDestination = try XCTUnwrap(
@@ -1156,6 +1291,137 @@ final class StatusBarControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testOpeningMenuRefreshesDestinationsWithoutOpeningProjectEditor() async throws {
+        let suiteName = "StatusBarControllerTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let catalog = ProjectCatalog(defaults: defaults, storageKey: "projects")
+        let old = XcodeDestination(platform: .iOSSimulator, id: "old", name: "Removed iPhone")
+        configure(catalog, schemes: ["Example"], destinations: [[old]])
+        let resolver = XcodeSchemeResolver { _ in
+            Data("{ platform:iOS Simulator, id:new, name:New iPhone }".utf8)
+        }
+        let controller = StatusBarController(
+            projectCatalog: catalog,
+            appSettings: AppSettings(defaults: defaults),
+            schemeResolver: resolver
+        )
+        let menu = controller.contextMenu
+        (controller as NSMenuDelegate).menuWillOpen?(menu)
+        let refreshed = expectation(for: NSPredicate { _, _ in
+            catalog.selectedProject?.selectedLaunchConfiguration?
+                .availableDestinations.map(\.id) == ["new"]
+        }, evaluatedWith: nil)
+        await fulfillment(of: [refreshed], timeout: 2)
+
+        let selection = try XCTUnwrap(catalog.selectedProject?.selectedLaunchConfiguration)
+        XCTAssertEqual(selection.selectedDestination, old)
+        XCTAssertFalse(selection.isSelectedDestinationAvailable)
+        let row = try XCTUnwrap(menu.items[1].view)
+        let labels = descendants(of: row).compactMap { $0 as? NSTextField }.map(\.stringValue)
+        XCTAssertTrue(labels.contains("Unavailable: Removed iPhone"))
+        let destinationButton = try XCTUnwrap(descendants(of: row).compactMap { $0 as? NSButton }.first {
+            $0.identifier?.rawValue == "destination-menu-button"
+        })
+        XCTAssertTrue(destinationButton.menu?.items.contains { $0.title == "New iPhone" } == true)
+        let runRow = try XCTUnwrap(menu.items.first { $0.title == "Run Project" }?.view)
+        XCTAssertFalse(try XCTUnwrap(descendants(of: runRow).compactMap { $0 as? NSButton }.first {
+            $0.title == "Run Project"
+        }).isEnabled)
+    }
+
+    @MainActor
+    func testDestinationRefreshFailureBlocksStaleLaunchAndCanRetry() async throws {
+        let suiteName = "StatusBarControllerTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let catalog = ProjectCatalog(defaults: defaults, storageKey: "projects")
+        let old = XcodeDestination(platform: .macOS, id: "mac", name: "My Mac")
+        configure(catalog, schemes: ["Example"], destinations: [[old]])
+        var attempt = 0
+        let resolver = XcodeSchemeResolver { _ in
+            attempt += 1
+            if attempt == 1 { throw TestLaunchError.failed }
+            return Data("{ platform:macOS, id:mac, name:My Mac }".utf8)
+        }
+        var launches = 0
+        let controller = StatusBarController(
+            projectCatalog: catalog, appSettings: AppSettings(defaults: defaults),
+            schemeResolver: resolver,
+            makeLauncher: { _ in launches += 1; return DeferredProjectLauncher() }
+        )
+        await controller.refreshDestinations()
+        controller.perform(.startProject)
+        XCTAssertEqual(launches, 0)
+        XCTAssertEqual(catalog.selectedProject?.selectedLaunchConfiguration?.selectedDestination, old)
+        XCTAssertTrue(controller.contextMenu.items.contains { $0.title.contains("Reopen menu to retry") })
+
+        await controller.refreshDestinations()
+        controller.perform(.startProject)
+        XCTAssertEqual(launches, 1)
+        XCTAssertFalse(controller.contextMenu.items.contains { $0.title.contains("Reopen menu to retry") })
+    }
+
+    @MainActor
+    func testDestinationRefreshDoesNotUpdateAnotherProjectAfterRemoval() async throws {
+        let suiteName = "StatusBarControllerTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let catalog = ProjectCatalog(defaults: defaults, storageKey: "projects")
+        let old = XcodeDestination(platform: .macOS, id: "mac", name: "My Mac")
+        configure(catalog, schemes: ["Example"], destinations: [[old]])
+        let started = expectation(description: "Discovery started")
+        let resume = DispatchSemaphore(value: 0)
+        let resolver = XcodeSchemeResolver { _ in
+            started.fulfill()
+            resume.wait()
+            return Data("{ platform:macOS, id:new, name:New Mac }".utf8)
+        }
+        let controller = StatusBarController(
+            projectCatalog: catalog, appSettings: AppSettings(defaults: defaults), schemeResolver: resolver
+        )
+        let refresh = Task { await controller.refreshDestinations() }
+        await fulfillment(of: [started], timeout: 2)
+        catalog.removeProject(at: 0)
+        catalog.add(URL(fileURLWithPath: "/Projects/Other.xcodeproj"), schemes: ["Example"])
+        catalog.setSchemeEnabled(true, scheme: "Example", forProjectAt: 0)
+        catalog.updateDestinations([old], scheme: "Example", forProjectAt: 0)
+        resume.signal()
+        await refresh.value
+        XCTAssertEqual(catalog.selectedProject?.name, "Other")
+        XCTAssertEqual(catalog.selectedProject?.selectedLaunchConfiguration?.availableDestinations, [old])
+        XCTAssertEqual(controller.contextMenu.items.first?.title, "Other")
+    }
+
+    @MainActor
+    func testFailureRefreshingAnotherSchemeDoesNotBlockSelectedConfiguration() async {
+        let suiteName = "StatusBarControllerTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let catalog = ProjectCatalog(defaults: defaults, storageKey: "projects")
+        let mac = XcodeDestination(platform: .macOS, id: "mac", name: "My Mac")
+        configure(catalog, schemes: ["Working", "Broken"], destinations: [[mac], [mac]])
+        let resolver = XcodeSchemeResolver { arguments in
+            if arguments.contains("Broken") { throw TestLaunchError.failed }
+            return Data("{ platform:macOS, id:mac, name:My Mac }".utf8)
+        }
+        var launchedSchemes: [String] = []
+        let controller = StatusBarController(
+            projectCatalog: catalog, appSettings: AppSettings(defaults: defaults), schemeResolver: resolver,
+            makeLauncher: { plan in launchedSchemes.append(plan.scheme); return DeferredProjectLauncher() }
+        )
+        await controller.refreshDestinations()
+        controller.perform(.startProject)
+        XCTAssertEqual(launchedSchemes, ["Working"])
+        // Stop the successful launch, then choose the scheme whose refresh failed.
+        if !launchedSchemes.isEmpty { controller.perform(.startProject) }
+        catalog.selectLaunchConfiguration(scheme: "Broken", forProjectAt: 0)
+        controller.refreshConfiguration()
+        controller.perform(.startProject)
+        XCTAssertEqual(launchedSchemes, ["Working"])
+    }
+
+    @MainActor
     private func configure(
         _ catalog: ProjectCatalog,
         schemes: [String],
@@ -1183,6 +1449,19 @@ final class StatusBarControllerTests: XCTestCase {
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
         try body(
+            ProjectCatalog(defaults: defaults, storageKey: "projects"),
+            AppSettings(defaults: defaults, storageKey: "settings")
+        )
+    }
+
+    @MainActor
+    private func withState(
+        _ body: (ProjectCatalog, AppSettings) async throws -> Void
+    ) async rethrows {
+        let suiteName = "StatusBarControllerTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        try await body(
             ProjectCatalog(defaults: defaults, storageKey: "projects"),
             AppSettings(defaults: defaults, storageKey: "settings")
         )

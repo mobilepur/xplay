@@ -27,5 +27,10 @@ jobs:
         run: sh ScriptsTests/launch-dev-test.sh
       - name: Test release workflow
         run: bash Tests/PackagingTests/ReleaseWorkflowTests.sh
+      - name: Test release versions and Homebrew updates
+        run: |
+          bash Tests/PackagingTests/ReleaseVersionTests.sh
+          ruby Tests/PackagingTests/HomebrewUpdateTests.rb
+
       - name: Test release package
         run: bash Tests/PackagingTests/ReleasePackageTests.sh
