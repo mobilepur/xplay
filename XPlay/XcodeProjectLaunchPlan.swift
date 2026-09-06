@@ -61,11 +61,11 @@ extension XcodeProjectLaunchPlan {
         else {
             return nil
         }
-        let identity = project.url.standardizedFileURL.path + "\0" + configuration.scheme
+        let identity = project.activeContainerURL.standardizedFileURL.path + "\0" + configuration.scheme
         let storageKey = SHA256.hash(data: Data(identity.utf8))
             .map { String(format: "%02x", $0) }.joined()
         return Self(
-            containerURL: project.url,
+            containerURL: project.activeContainerURL,
             containerKind: project.kind,
             scheme: configuration.scheme,
             destination: destination,

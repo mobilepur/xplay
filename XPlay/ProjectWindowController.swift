@@ -44,8 +44,14 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
         static let destinationSelector = NSUserInterfaceItemIdentifier("DestinationSelector")
     }
 
+    private struct SchemeRequest: Hashable {
+        let projectURL: URL
+        let containerURL: URL
+    }
+
     private struct DestinationRequest: Hashable {
         let projectURL: URL
+        let containerURL: URL
         let scheme: String
     }
 
@@ -53,7 +59,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
     private let schemeResolver: XcodeSchemeResolver
     private let presentResolutionFailure: ((ResolutionFailure) -> Bool)?
     private let onCatalogChange: (() -> Void)?
-    private var resolvingProjectURLs = Set<URL>()
+    private var resolvingSchemes = Set<SchemeRequest>()
     private var resolvingDestinations = Set<DestinationRequest>()
 
     private(set) lazy var projectTableView: NSTableView = {
@@ -317,6 +323,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
             await refreshDestinations(
                 scheme: scheme,
                 projectURL: project.url,
+                containerURL: project.activeContainerURL,
                 kind: project.kind
             )
         }
@@ -441,11 +448,11 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
         ) as? NSTableCellView ?? makeProjectCell()
 
         cell.textField?.stringValue = project.name
-        cell.imageView?.image = NSWorkspace.shared.icon(forFile: project.url.path)
+        cell.imageView?.image = NSWorkspace.shared.icon(forFile: project.activeContainerURL.path)
         cell.subviews
             .compactMap { $0 as? NSTextField }
             .first { $0.identifier == Identifier.projectPath }?
-            .stringValue = project.url.path
+            .stringValue = project.activeContainerURL.path
 
         let removeButton = cell.subviews
             .compactMap { $0 as? NSButton }
@@ -511,7 +518,11 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
         selector.action = #selector(selectDestination(_:))
         selector.setAccessibilityLabel("Destination for \(configuration.scheme)")
 
-        let request = DestinationRequest(projectURL: project.url, scheme: configuration.scheme)
+        let request = DestinationRequest(
+            projectURL: project.url,
+            containerURL: project.activeContainerURL,
+            scheme: configuration.scheme
+        )
         if resolvingDestinations.contains(request) {
             if
                 configuration.selectedDestination != nil
@@ -603,7 +614,8 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
             schemeStatusLabel.setAccessibilityLabel("Select a project")
             return
         }
-        if resolvingProjectURLs.contains(project.url) {
+        let request = SchemeRequest(projectURL: project.url, containerURL: project.activeContainerURL)
+        if resolvingSchemes.contains(request) {
             schemeStatusLabel.stringValue = "Loading schemes…"
             schemeStatusLabel.setAccessibilityLabel("Loading schemes")
         } else if project.configurations.isEmpty {
@@ -761,23 +773,26 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
         guard let project = catalog.projects[safe: row] else {
             return
         }
-        guard !resolvingProjectURLs.contains(project.url) else {
+        let request = SchemeRequest(projectURL: project.url, containerURL: project.activeContainerURL)
+        guard !resolvingSchemes.contains(request) else {
             return
         }
 
-        resolvingProjectURLs.insert(project.url)
+        resolvingSchemes.insert(request)
         reloadTables()
         defer {
-            resolvingProjectURLs.remove(project.url)
+            resolvingSchemes.remove(request)
             reloadTables()
         }
 
         let resolver = schemeResolver
         do {
             let schemes = try await Task.detached(priority: .userInitiated) {
-                try resolver.schemes(for: project.url, kind: project.kind)
+                try resolver.schemes(for: project.activeContainerURL, kind: project.kind)
             }.value
-            guard let currentRow = catalog.projects.firstIndex(where: { $0.url == project.url }) else {
+            guard let currentRow = catalog.projects.firstIndex(where: {
+                $0.url == project.url && $0.activeContainerURL == project.activeContainerURL
+            }) else {
                 return
             }
             catalog.updateSchemes(schemes, forProjectAt: currentRow)
@@ -788,17 +803,25 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
                 await refreshDestinations(
                     scheme: scheme,
                     projectURL: project.url,
+                    containerURL: project.activeContainerURL,
                     kind: project.kind
                 )
             }
         } catch {
-            resolvingProjectURLs.remove(project.url)
+            guard catalog.projects.contains(where: {
+                $0.url == project.url && $0.activeContainerURL == project.activeContainerURL
+            }) else {
+                return
+            }
+            resolvingSchemes.remove(request)
             reloadTables()
             if shouldRetryResolution(
                 error,
                 projectName: project.name,
                 subject: "schemes"
-            ), let currentRow = catalog.projects.firstIndex(where: { $0.url == project.url }) {
+            ), let currentRow = catalog.projects.firstIndex(where: {
+                $0.url == project.url && $0.activeContainerURL == project.activeContainerURL
+            }) {
                 await refreshSchemes(forProjectAt: currentRow)
             }
         }
@@ -807,9 +830,17 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
     private func refreshDestinations(
         scheme: String,
         projectURL: URL,
+        containerURL: URL,
         kind: XcodeContainerKind
     ) async {
-        let request = DestinationRequest(projectURL: projectURL, scheme: scheme)
+        guard catalog.projects.contains(where: {
+            $0.url == projectURL && $0.activeContainerURL == containerURL
+        }) else {
+            return
+        }
+        let request = DestinationRequest(
+            projectURL: projectURL, containerURL: containerURL, scheme: scheme
+        )
         guard !resolvingDestinations.contains(request) else {
             return
         }
@@ -824,14 +855,21 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
         let resolver = schemeResolver
         do {
             let destinations = try await Task.detached(priority: .userInitiated) {
-                try resolver.destinations(for: projectURL, kind: kind, scheme: scheme)
+                try resolver.destinations(for: containerURL, kind: kind, scheme: scheme)
             }.value
-            guard let projectIndex = catalog.projects.firstIndex(where: { $0.url == projectURL }) else {
+            guard let projectIndex = catalog.projects.firstIndex(where: {
+                $0.url == projectURL && $0.activeContainerURL == containerURL
+            }) else {
                 return
             }
             catalog.updateDestinations(destinations, scheme: scheme, forProjectAt: projectIndex)
             onCatalogChange?()
         } catch {
+            guard catalog.projects.contains(where: {
+                $0.url == projectURL && $0.activeContainerURL == containerURL
+            }) else {
+                return
+            }
             let projectName = projectURL.deletingPathExtension().lastPathComponent
             resolvingDestinations.remove(request)
             schemeTableView.reloadData()
@@ -843,6 +881,7 @@ final class ProjectWindowController: NSWindowController, NSTableViewDataSource, 
                 await refreshDestinations(
                     scheme: scheme,
                     projectURL: projectURL,
+                    containerURL: containerURL,
                     kind: kind
                 )
             }

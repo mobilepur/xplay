@@ -93,19 +93,26 @@ struct SavedProject: Codable, Equatable {
     let kind: XcodeContainerKind
     var configurations: [LaunchConfiguration]
     var selectedLaunchConfigurationScheme: String?
+    var selectedWorkingCopyURL: URL?
 
     init(
         url: URL,
         kind: XcodeContainerKind,
         configurations: [LaunchConfiguration] = [],
-        selectedLaunchConfigurationScheme: String? = nil
+        selectedLaunchConfigurationScheme: String? = nil,
+        selectedWorkingCopyURL: URL? = nil
     ) {
         self.url = url.standardizedFileURL
         self.kind = kind
         self.configurations = configurations
+        self.selectedWorkingCopyURL = selectedWorkingCopyURL?.standardizedFileURL
         self.selectedLaunchConfigurationScheme = configurations.first(where: {
             $0.isEnabled && $0.scheme == selectedLaunchConfigurationScheme
         })?.scheme ?? configurations.first(where: \.isEnabled)?.scheme
+    }
+
+    var activeContainerURL: URL {
+        selectedWorkingCopyURL ?? url
     }
 
     var name: String {
@@ -151,7 +158,8 @@ final class ProjectCatalog {
                     url: $0.url,
                     kind: $0.kind,
                     configurations: $0.configurations,
-                    selectedLaunchConfigurationScheme: $0.selectedLaunchConfigurationScheme
+                    selectedLaunchConfigurationScheme: $0.selectedLaunchConfigurationScheme,
+                    selectedWorkingCopyURL: $0.selectedWorkingCopyURL
                 )
             }
         } else {
@@ -200,6 +208,19 @@ final class ProjectCatalog {
 
         selectedProject = projects[index]
         persist()
+    }
+
+    func selectWorkingCopy(containerURL: URL?, forProjectAt index: Int) {
+        guard projects.indices.contains(index) else {
+            return
+        }
+        let normalizedURL = containerURL?.standardizedFileURL
+        if let normalizedURL, Self.containerKind(for: normalizedURL) != projects[index].kind {
+            return
+        }
+
+        projects[index].selectedWorkingCopyURL = normalizedURL
+        finishProjectMutation(at: index)
     }
 
     func updateSchemes(_ schemes: [String], forProjectAt index: Int) {

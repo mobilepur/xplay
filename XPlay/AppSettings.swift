@@ -20,11 +20,13 @@ final class AppSettings {
     }
 
     private let defaults: UserDefaults
+    private let automaticallySelectLatestBranchKey: String
     private let acceptsMacrosKey: String
     private let menuBarContentKey: String
     private let clickBehaviorKey: String
     private var clickBehavior: ClickBehavior
 
+    private(set) var automaticallySelectLatestBranch: Bool
     private(set) var acceptsMacros: Bool
     private(set) var menuBarContent: MenuBarContent
 
@@ -38,6 +40,8 @@ final class AppSettings {
 
     init(defaults: UserDefaults = .standard, storageKey: String = "settings") {
         self.defaults = defaults
+        automaticallySelectLatestBranchKey = "\(storageKey).automaticallySelectLatestBranch"
+        automaticallySelectLatestBranch = defaults.bool(forKey: automaticallySelectLatestBranchKey)
         acceptsMacrosKey = "\(storageKey).acceptsMacros"
         menuBarContentKey = "\(storageKey).menuBarContent"
         clickBehaviorKey = "\(storageKey).clickBehavior"
@@ -46,6 +50,11 @@ final class AppSettings {
             .flatMap(MenuBarContent.init(rawValue:)) ?? .xplay
         clickBehavior = defaults.string(forKey: clickBehaviorKey)
             .flatMap(ClickBehavior.init(rawValue:)) ?? .playOnLeft
+    }
+
+    func setAutomaticallySelectLatestBranch(_ enabled: Bool) {
+        automaticallySelectLatestBranch = enabled
+        defaults.set(enabled, forKey: automaticallySelectLatestBranchKey)
     }
 
     func setAcceptsMacros(_ acceptsMacros: Bool) {

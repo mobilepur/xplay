@@ -143,6 +143,12 @@ final class ProjectCatalogTests: XCTestCase {
                 catalog.selectedProject?.selectedLaunchConfiguration?.scheme,
                 "Enabled"
             )
+            XCTAssertNil(catalog.selectedProject?.selectedWorkingCopyURL)
+            XCTAssertEqual(catalog.selectedProject?.activeContainerURL, workspaceURL)
+            XCTAssertEqual(
+                ProjectCatalog(defaults: defaults, storageKey: "projects").projects,
+                catalog.projects
+            )
         }
     }
 
@@ -216,6 +222,114 @@ final class ProjectCatalogTests: XCTestCase {
 
             let reloadedCatalog = ProjectCatalog(defaults: defaults, storageKey: "projects")
             XCTAssertEqual(reloadedCatalog.projects, catalog.projects)
+        }
+    }
+
+    @MainActor
+    func testSelectingWorkingCopyPersistsNormalizesAndResetsToOriginal() throws {
+        try withDefaults { defaults in
+            let originalURL = URL(fileURLWithPath: "/Projects/Example.xcworkspace")
+            let worktreeURL = URL(fileURLWithPath: "/Worktrees/feature/Example.xcworkspace")
+            let catalog = ProjectCatalog(defaults: defaults, storageKey: "projects")
+            catalog.add(originalURL, schemes: ["Example", "Other"])
+            catalog.selectWorkingCopy(
+                containerURL: URL(fileURLWithPath: "/Worktrees/unused/../feature/Example.xcworkspace"),
+                forProjectAt: 0
+            )
+            XCTAssertEqual(catalog.selectedProject?.selectedWorkingCopyURL, worktreeURL)
+            XCTAssertEqual(catalog.selectedProject?.activeContainerURL, worktreeURL)
+            XCTAssertEqual(catalog.selectedProject?.url, originalURL)
+            XCTAssertEqual(catalog.selectedProject?.name, "Example")
+
+            let mac = XcodeDestination(platform: .macOS, id: "mac", name: "My Mac")
+            catalog.updateSchemes(["Example", "Other", "New"], forProjectAt: 0)
+            catalog.setSchemeEnabled(true, scheme: "Example", forProjectAt: 0)
+            catalog.setSchemeEnabled(true, scheme: "Other", forProjectAt: 0)
+            catalog.updateDestinations([mac], scheme: "Other", forProjectAt: 0)
+            catalog.selectDestination(id: mac.id, scheme: "Other", forProjectAt: 0)
+            catalog.selectLaunchConfiguration(scheme: "Other", forProjectAt: 0)
+            catalog.add(URL(fileURLWithPath: "/Projects/Second.xcodeproj"))
+            catalog.selectProject(at: 0)
+            catalog.removeProject(at: 1)
+            let reloaded = ProjectCatalog(defaults: defaults, storageKey: "projects")
+            let selected = try XCTUnwrap(reloaded.selectedProject)
+            XCTAssertEqual(selected.activeContainerURL, worktreeURL)
+            XCTAssertEqual(selected.selectedLaunchConfiguration?.scheme, "Other")
+            XCTAssertEqual(selected.selectedLaunchConfiguration?.selectedDestination, mac)
+
+            reloaded.selectWorkingCopy(containerURL: nil, forProjectAt: 0)
+            let reset = ProjectCatalog(defaults: defaults, storageKey: "projects")
+            XCTAssertNil(reset.selectedProject?.selectedWorkingCopyURL)
+            XCTAssertEqual(reset.selectedProject?.activeContainerURL, originalURL)
+            XCTAssertEqual(reset.selectedProject?.selectedLaunchConfiguration?.scheme, "Other")
+        }
+    }
+
+    @MainActor
+    func testSelectingWorkingCopyRejectsWrongContainerKindAndInvalidIndex() {
+        withDefaults { defaults in
+            let originalURL = URL(fileURLWithPath: "/Projects/Example.xcworkspace")
+            let worktreeURL = URL(fileURLWithPath: "/Worktrees/feature/Example.xcworkspace")
+            let catalog = ProjectCatalog(defaults: defaults, storageKey: "projects")
+            catalog.add(originalURL)
+            catalog.selectWorkingCopy(containerURL: worktreeURL, forProjectAt: 0)
+
+            catalog.selectWorkingCopy(
+                containerURL: URL(fileURLWithPath: "/Worktrees/feature/Example.xcodeproj"),
+                forProjectAt: 0
+            )
+            catalog.selectWorkingCopy(containerURL: nil, forProjectAt: -1)
+            catalog.selectWorkingCopy(containerURL: nil, forProjectAt: 1)
+
+            XCTAssertEqual(catalog.selectedProject?.activeContainerURL, worktreeURL)
+            XCTAssertEqual(
+                ProjectCatalog(defaults: defaults, storageKey: "projects")
+                    .selectedProject?.selectedWorkingCopyURL,
+                worktreeURL
+            )
+        }
+    }
+
+    func testSavedProjectDefaultsToOriginalContainerAndNormalizesSelectedWorkingCopy() {
+        let originalURL = URL(fileURLWithPath: "/Projects/Example.xcodeproj")
+        XCTAssertEqual(SavedProject(url: originalURL, kind: .project).activeContainerURL, originalURL)
+        let selected = SavedProject(
+            url: originalURL,
+            kind: .project,
+            selectedWorkingCopyURL: URL(fileURLWithPath: "/Worktrees/unused/../feature/Example.xcodeproj")
+        )
+        XCTAssertEqual(selected.activeContainerURL.path, "/Worktrees/feature/Example.xcodeproj")
+        XCTAssertEqual(selected.url, originalURL)
+    }
+
+    @MainActor
+    func testStoredWorkingCopySurvivesCatalogReloadAndMutation() throws {
+        try withDefaults { defaults in
+            let originalURL = URL(fileURLWithPath: "/Projects/Example.xcworkspace")
+            let worktreeURL = URL(fileURLWithPath: "/Worktrees/feature/Example.xcworkspace")
+            let original = SavedProject(url: originalURL, kind: .workspace)
+            var record = try XCTUnwrap(JSONSerialization.jsonObject(
+                with: JSONEncoder().encode(original)
+            ) as? [String: Any])
+            record["selectedWorkingCopyURL"] = URL(
+                fileURLWithPath: "/Worktrees/unused/../feature/Example.xcworkspace"
+            ).absoluteString
+            defaults.set(try JSONSerialization.data(withJSONObject: [record]), forKey: "projects.records.v2")
+            defaults.set(originalURL.path, forKey: "projects.selected")
+
+            let catalog = ProjectCatalog(defaults: defaults, storageKey: "projects")
+            catalog.updateSchemes(["Example"], forProjectAt: 0)
+            catalog.setSchemeEnabled(true, scheme: "Example", forProjectAt: 0)
+            let reloaded = ProjectCatalog(defaults: defaults, storageKey: "projects")
+            let saved = try XCTUnwrap(reloaded.selectedProject)
+            let encoded = try XCTUnwrap(JSONSerialization.jsonObject(
+                with: JSONEncoder().encode(saved)
+            ) as? [String: Any])
+
+            XCTAssertEqual(saved.url, originalURL)
+            XCTAssertEqual(saved.name, "Example")
+            XCTAssertEqual(encoded["selectedWorkingCopyURL"] as? String, worktreeURL.absoluteString)
+            XCTAssertEqual(saved.selectedLaunchConfiguration?.scheme, "Example")
         }
     }
 

@@ -92,6 +92,39 @@ final class XcodeProjectLaunchPlanTests: XCTestCase {
         XCTAssertNotEqual(slash.logURL, colon.logURL)
     }
 
+    func testStoredWorkingCopyChangesBuildPathAndStorageIdentity() throws {
+        let originalURL = URL(fileURLWithPath: "/Projects/Example.xcworkspace")
+        let worktreeURL = URL(fileURLWithPath: "/Worktrees/feature/Example.xcworkspace")
+        let original = SavedProject(url: originalURL, kind: .workspace)
+        var record = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(original)
+        ) as? [String: Any])
+        record["selectedWorkingCopyURL"] = worktreeURL.absoluteString
+        let selected = try JSONDecoder().decode(
+            SavedProject.self, from: JSONSerialization.data(withJSONObject: record)
+        )
+        let mac = XcodeDestination(platform: .macOS, id: "mac", name: "My Mac")
+        let configuration = LaunchConfiguration(
+            scheme: "Example", isEnabled: true,
+            availableDestinations: [mac], selectedDestinationID: mac.id
+        )
+        func plan(_ project: SavedProject) throws -> XcodeProjectLaunchPlan {
+            try XCTUnwrap(XcodeProjectLaunchPlan.make(
+                for: project, configuration: configuration,
+                cacheDirectory: URL(fileURLWithPath: "/Caches/XPlay"), acceptsMacros: false
+            ))
+        }
+
+        let main = try plan(original)
+        let worktree = try plan(selected)
+        XCTAssertEqual(worktree.containerURL, worktreeURL)
+        XCTAssertEqual(Array(worktree.buildArguments.prefix(2)), ["-workspace", worktreeURL.path])
+        XCTAssertNotEqual(worktree.derivedDataURL, main.derivedDataURL)
+        XCTAssertNotEqual(worktree.logURL, main.logURL)
+        XCTAssertEqual(worktree, try plan(SavedProject(url: worktreeURL, kind: .workspace)))
+        XCTAssertEqual(worktree.productName, original.name)
+    }
+
     private func makePlan(
         destination: XcodeDestination = XcodeDestination(
             platform: .macOS,

@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         )
         Task { [weak self] in
+            await self?.statusBarController?.refreshWorkingCopies()
             await self?.statusBarController?.refreshDestinations()
         }
     }
