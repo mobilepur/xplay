@@ -226,6 +226,10 @@ final class StatusBarControllerTests: XCTestCase {
             XCTAssertEqual(stopAlignmentRect.width, 44, accuracy: 0.5)
             XCTAssertEqual(play.title, "Run")
             XCTAssertEqual(play.font, .systemFont(ofSize: 16, weight: .medium))
+            XCTAssertEqual(play.bezelColor, .systemBlue)
+            if #available(macOS 26.0, *) {
+                XCTAssertEqual(play.tintProminence, .primary)
+            }
             XCTAssertEqual(play.image?.name(), NSImage.Name("XPlayIcon"))
             XCTAssertEqual(play.image?.size, NSSize(width: 21, height: 18))
             XCTAssertTrue(play.image?.isTemplate == true)
@@ -970,7 +974,7 @@ final class StatusBarControllerTests: XCTestCase {
                 row.subviews.compactMap { $0 as? NSTextField }.first
             )
             let toggle = try XCTUnwrap(
-                row.subviews.compactMap { $0 as? NSSwitch }.first
+                row.subviews.compactMap { $0 as? MenuTintedSwitch }.first
             )
             row.layoutSubtreeIfNeeded()
 
@@ -1000,7 +1004,7 @@ final class StatusBarControllerTests: XCTestCase {
             )
             let row = try XCTUnwrap(item.view)
             let toggle = try XCTUnwrap(
-                row.subviews.compactMap { $0 as? NSSwitch }.first
+                row.subviews.compactMap { $0 as? MenuTintedSwitch }.first
             )
 
             toggle.performClick(nil)
@@ -1028,7 +1032,7 @@ final class StatusBarControllerTests: XCTestCase {
             )
             let row = try XCTUnwrap(item.view)
             let toggle = try XCTUnwrap(
-                row.subviews.compactMap { $0 as? NSSwitch }.first
+                row.subviews.compactMap { $0 as? MenuTintedSwitch }.first
             )
 
             XCTAssertEqual(toggle.state, .on)

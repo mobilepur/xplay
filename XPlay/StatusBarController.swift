@@ -1,4 +1,141 @@
 import AppKit
+import SwiftUI
+
+@MainActor
+private final class MenuSwitchState: ObservableObject {
+    @Published var isOn = false
+    @Published var isEnabled = true
+}
+
+private struct MenuSwitchContent: View {
+    @ObservedObject var model: MenuSwitchState
+    let title: String
+    let setOn: (Bool) -> Void
+
+    var body: some View {
+        Toggle(title, isOn: Binding(get: { model.isOn }, set: setOn))
+            .labelsHidden()
+            .toggleStyle(MenuSwitchStyle())
+            .disabled(!model.isEnabled)
+            .fixedSize()
+    }
+}
+
+private struct MenuSwitchStyle: ToggleStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.12)) {
+                configuration.isOn.toggle()
+            }
+        } label: {
+            Capsule()
+                .fill(configuration.isOn ? Color(nsColor: .systemBlue) : Color.primary.opacity(0.15))
+                .frame(width: 44, height: 20)
+                .overlay(alignment: configuration.isOn ? .trailing : .leading) {
+                    Capsule().fill(.white)
+                        .frame(width: 26, height: 16)
+                        .padding(.horizontal, 2)
+                }
+                .opacity(isEnabled ? 1 : 0.45)
+        }
+        .buttonStyle(.plain)
+        .highPriorityGesture(DragGesture(minimumDistance: 4).onEnded { value in
+            guard isEnabled else { return }
+            withAnimation(.easeInOut(duration: 0.12)) {
+                configuration.isOn = value.location.x >= 22
+            }
+        })
+        .accessibilityRepresentation {
+            Toggle(isOn: configuration.$isOn) { configuration.label }
+                .toggleStyle(.switch)
+        }
+    }
+}
+
+@MainActor
+final class MenuTintedSwitch: NSControl {
+    private let model = MenuSwitchState()
+    private var hostingView: NSHostingView<MenuSwitchContent>!
+
+    var state: NSControl.StateValue {
+        get { model.isOn ? .on : .off }
+        set { model.isOn = newValue == .on }
+    }
+
+    override var isEnabled: Bool {
+        didSet { model.isEnabled = isEnabled }
+    }
+
+    init(title: String) {
+        super.init(frame: .zero)
+        // NSSwitch has no public tint API. Use an accessible SwiftUI toggle
+        // with explicit colors that remain visible in a non-key menu window.
+        hostingView = NSHostingView(rootView: MenuSwitchContent(model: model, title: title) { [weak self] isOn in
+            guard let self, self.isEnabled else { return }
+            self.state = isOn ? .on : .off
+            self.sendAction(self.action, to: self.target)
+        })
+        hostingView.frame = bounds
+        hostingView.autoresizingMask = [.width, .height]
+        addSubview(hostingView)
+        setAccessibilityElement(false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override var intrinsicContentSize: NSSize { hostingView.fittingSize }
+
+    override func performClick(_ sender: Any?) {
+        guard isEnabled else { return }
+        state = state == .on ? .off : .on
+        sendAction(action, to: target)
+    }
+}
+
+@MainActor
+private final class MenuRunButtonCell: NSButtonCell {
+    override var interiorBackgroundStyle: NSView.BackgroundStyle {
+        isEnabled ? .emphasized : super.interiorBackgroundStyle
+    }
+
+    override func drawBezel(withFrame frame: NSRect, in controlView: NSView) {
+        guard isEnabled else {
+            super.drawBezel(withFrame: frame, in: controlView)
+            return
+        }
+        let content = drawingRect(forBounds: frame)
+        let bezel = NSRect(x: frame.minX, y: content.minY, width: frame.width, height: content.height)
+        let radius: CGFloat
+        if #available(macOS 26.0, *) { radius = bezel.height / 2 } else { radius = 6 }
+        let color = isHighlighted ? NSColor.systemBlue.blended(withFraction: 0.18, of: .black)! : .systemBlue
+        color.setFill()
+        NSBezierPath(roundedRect: bezel, xRadius: radius, yRadius: radius).fill()
+    }
+
+    override func drawTitle(_ title: NSAttributedString, withFrame frame: NSRect, in controlView: NSView) -> NSRect {
+        guard isEnabled else { return super.drawTitle(title, withFrame: frame, in: controlView) }
+        let text = NSMutableAttributedString(attributedString: title)
+        text.addAttribute(.foregroundColor, value: NSColor.white, range: NSRange(location: 0, length: text.length))
+        return super.drawTitle(text, withFrame: frame, in: controlView)
+    }
+
+    override func drawImage(_ image: NSImage, withFrame frame: NSRect, in controlView: NSView) {
+        guard isEnabled, image.isTemplate else {
+            super.drawImage(image, withFrame: frame, in: controlView)
+            return
+        }
+        let tinted = NSImage(size: image.size, flipped: false) { bounds in
+            image.draw(in: bounds)
+            NSColor.white.setFill()
+            bounds.fill(using: .sourceIn)
+            return true
+        }
+        super.drawImage(tinted, withFrame: frame, in: controlView)
+    }
+}
 
 @MainActor
 private final class ConfigurationActionButton: NSButton {
@@ -833,11 +970,17 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         let row = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 54))
         row.autoresizingMask = [.width]
         let playButton = NSButton(title: "Run", target: self, action: #selector(playFromMenu))
+        playButton.cell = MenuRunButtonCell(textCell: "Run")
+        playButton.target = self
+        playButton.action = #selector(playFromMenu)
         playButton.identifier = NSUserInterfaceItemIdentifier("run-project-button")
         playButton.bezelStyle = .rounded
         playButton.controlSize = .large
         playButton.font = .systemFont(ofSize: 16, weight: .medium)
-        playButton.bezelColor = .controlAccentColor
+        playButton.bezelColor = .systemBlue
+        if #available(macOS 26.0, *) {
+            playButton.tintProminence = .primary
+        }
         playButton.image = menuBarImage(description: "XPlay")
         playButton.imagePosition = .imageLeading
         playButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -1155,7 +1298,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         label.font = .menuFont(ofSize: NSFont.systemFontSize)
         label.translatesAutoresizingMaskIntoConstraints = false
 
-        let toggle = NSSwitch(frame: .zero)
+        let toggle = MenuTintedSwitch(title: title)
         toggle.controlSize = .small
         toggle.state = isOn ? .on : .off
         toggle.target = self
@@ -1549,7 +1692,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     @objc
-    private func setMacroAcceptance(_ toggle: NSSwitch) {
+    private func setMacroAcceptance(_ toggle: MenuTintedSwitch) {
         if toggle.state == .on {
             guard confirmMacroAcceptance() else {
                 toggle.state = .off
@@ -1784,7 +1927,7 @@ private extension StatusBarController {
         return item
     }
 
-    @objc func setAutomaticBranchSelection(_ toggle: NSSwitch) {
+    @objc func setAutomaticBranchSelection(_ toggle: MenuTintedSwitch) {
         appSettings.setAutomaticallySelectLatestBranch(toggle.state == .on)
         rebuildContextMenu()
         refreshConfiguration()

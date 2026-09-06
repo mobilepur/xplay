@@ -220,7 +220,7 @@ final class WorkingCopyMenuTests: XCTestCase {
         let item = try XCTUnwrap(controller.contextMenu.items.first {
             $0.title == "Automatically Select Latest Branch"
         })
-        let toggle = try XCTUnwrap(item.view?.subviews.compactMap { $0 as? NSSwitch }.first)
+        let toggle = try XCTUnwrap(item.view?.subviews.compactMap { $0 as? MenuTintedSwitch }.first)
         XCTAssertEqual(toggle.state, .off)
         toggle.state = .on
         toggle.sendAction(toggle.action, to: toggle.target)
@@ -232,7 +232,7 @@ final class WorkingCopyMenuTests: XCTestCase {
         let reloaded = fixture.controller()
         let persisted = try XCTUnwrap(reloaded.contextMenu.items.first {
             $0.title == "Automatically Select Latest Branch"
-        }?.view?.subviews.compactMap { $0 as? NSSwitch }.first)
+        }?.view?.subviews.compactMap { $0 as? MenuTintedSwitch }.first)
         XCTAssertEqual(persisted.state, .on)
         toggle.state = .off
         toggle.sendAction(toggle.action, to: toggle.target)
@@ -270,7 +270,7 @@ final class WorkingCopyMenuTests: XCTestCase {
         controller.perform(.startProject)
         let toggle = try XCTUnwrap(controller.contextMenu.items.first {
             $0.title == "Automatically Select Latest Branch"
-        }?.view?.subviews.compactMap { $0 as? NSSwitch }.first)
+        }?.view?.subviews.compactMap { $0 as? MenuTintedSwitch }.first)
         toggle.state = .on
         toggle.sendAction(toggle.action, to: toggle.target)
         await controller.refreshWorkingCopies(force: true)
