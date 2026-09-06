@@ -1599,8 +1599,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             button.setAccessibilityLabel(canStart ? "Start project" : "\(description). \(menuHint)")
         }
         button.setAccessibilityHelp([destination?.displayName, menuHint].compactMap { $0 }.joined(separator: ". "))
-        button.toolTip = canStart && appSettings.leftClickAction == .play
-            ? description : "\(description) · \(menuHint)"
+        button.toolTip = activeLaunchPlan == nil ? "XPlay" : description
         updateLaunchButtons()
     }
 

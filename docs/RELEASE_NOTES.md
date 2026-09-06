@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 1.1.1 — 2026-09-06
+
+### Changed
+
+- Shorten the menu bar tooltip to XPlay while preserving build progress.
+
 ## 1.1.0 — 2026-09-06
 
 ### Added

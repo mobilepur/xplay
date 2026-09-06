@@ -87,7 +87,7 @@ final class StatusBarControllerTests: XCTestCase {
             XCTAssertEqual(settings.rightClickAction, .play)
             XCTAssertEqual(settings.leftClickAction, .menu)
             XCTAssertEqual(controller.statusItem.button?.accessibilityLabel(), "Open XPlay menu")
-            XCTAssertTrue(controller.statusItem.button?.toolTip?.contains("Left-click for menu") == true)
+            XCTAssertEqual(controller.statusItem.button?.toolTip, "XPlay")
             let left = try XCTUnwrap(controller.contextMenu.items.first { $0.title == "Left Click" }?.submenu)
             XCTAssertEqual(left.items[1].state, .on)
             XCTAssertEqual(StatusBarController.interaction(for: .leftMouseUp,
@@ -98,6 +98,7 @@ final class StatusBarControllerTests: XCTestCase {
             refreshedRight.performActionForItem(at: 1)
             XCTAssertEqual(settings.leftClickAction, .play)
             XCTAssertEqual(settings.rightClickAction, .menu)
+            XCTAssertEqual(controller.statusItem.button?.toolTip, "XPlay")
             XCTAssertNil(StatusBarController.interaction(for: .mouseMoved))
         }
     }
