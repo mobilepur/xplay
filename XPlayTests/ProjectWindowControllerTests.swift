@@ -451,6 +451,143 @@ final class ProjectWindowControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testEditorDisplaysAndResolvesSelectedWorkingCopy() async throws {
+        try await withCatalog { catalog in
+            let originalURL = URL(fileURLWithPath: "/Projects/Example.xcworkspace")
+            let worktreeURL = URL(fileURLWithPath: "/Worktrees/feature/Example.xcworkspace")
+            catalog.add(originalURL, schemes: ["Example"])
+            catalog.selectWorkingCopy(containerURL: worktreeURL, forProjectAt: 0)
+            let resolver = XcodeSchemeResolver { arguments in
+                if arguments.first == "-showdestinations" {
+                    XCTAssertEqual(arguments, ["-showdestinations", "-workspace", worktreeURL.path, "-scheme", "Example"])
+                    return Data("{ platform:macOS, id:mac, name:My Mac }".utf8)
+                }
+                XCTAssertEqual(arguments, ["-list", "-json", "-workspace", worktreeURL.path])
+                return Data("{\"workspace\":{\"schemes\":[\"Example\"]}}".utf8)
+            }
+            let controller = ProjectWindowController(catalog: catalog, schemeResolver: resolver)
+            controller.loadWindow()
+            await controller.refreshSchemes()
+            await controller.setSchemeEnabled(true, scheme: "Example")
+
+            let cell = try XCTUnwrap(controller.tableView(
+                controller.projectTableView,
+                viewFor: controller.projectTableView.tableColumns[0], row: 0
+            ))
+            XCTAssertEqual(descendants(of: NSTextField.self, in: cell).map(\.stringValue), ["Example", worktreeURL.path])
+            XCTAssertEqual(catalog.selectedProject?.url, originalURL)
+            XCTAssertEqual(catalog.selectedProject?.selectedLaunchConfiguration?.selectedDestination?.id, "mac")
+        }
+    }
+
+    @MainActor
+    func testChangingWorkingCopyAllowsNewSchemeRequestAndIgnoresLateResults() async {
+        await withCatalog { catalog in
+            let originalURL = URL(fileURLWithPath: "/Projects/Example.xcworkspace")
+            let worktreeURL = URL(fileURLWithPath: "/Worktrees/feature/Example.xcworkspace")
+            catalog.add(originalURL, schemes: ["Cached"])
+            let started = expectation(description: "Original scheme request started")
+            let finishOld = DispatchSemaphore(value: 0)
+            let resolver = XcodeSchemeResolver { arguments in
+                if arguments.contains(originalURL.path) {
+                    started.fulfill()
+                    finishOld.wait()
+                    return Data("{\"workspace\":{\"schemes\":[\"Old\"]}}".utf8)
+                }
+                return Data("{\"workspace\":{\"schemes\":[\"Current\"]}}".utf8)
+            }
+            let controller = ProjectWindowController(catalog: catalog, schemeResolver: resolver)
+            controller.loadWindow()
+            let oldRefresh = Task { await controller.refreshSchemes() }
+            await fulfillment(of: [started], timeout: 2)
+
+            catalog.selectWorkingCopy(containerURL: worktreeURL, forProjectAt: 0)
+            controller.refreshFromCatalog()
+            XCTAssertEqual(controller.schemeStatusLabel.stringValue, "")
+            await controller.refreshSchemes()
+            XCTAssertEqual(catalog.selectedProject?.schemes, ["Current"])
+            finishOld.signal()
+            await oldRefresh.value
+
+            XCTAssertEqual(catalog.selectedProject?.schemes, ["Current"])
+            XCTAssertEqual(controller.schemeStatusLabel.stringValue, "")
+        }
+    }
+
+    @MainActor
+    func testChangingWorkingCopyAllowsNewDestinationRequestAndIgnoresLateResults() async {
+        await withCatalog { catalog in
+            let originalURL = URL(fileURLWithPath: "/Projects/Example.xcworkspace")
+            let worktreeURL = URL(fileURLWithPath: "/Worktrees/feature/Example.xcworkspace")
+            catalog.add(originalURL, schemes: ["Example"])
+            let started = expectation(description: "Original destination request started")
+            let finishOld = DispatchSemaphore(value: 0)
+            let resolver = XcodeSchemeResolver { arguments in
+                if arguments.contains(originalURL.path) {
+                    started.fulfill()
+                    finishOld.wait()
+                    return Data("{ platform:macOS, id:old, name:Old Mac }".utf8)
+                }
+                return Data("{ platform:macOS, id:current, name:Current Mac }".utf8)
+            }
+            let controller = ProjectWindowController(catalog: catalog, schemeResolver: resolver)
+            controller.loadWindow()
+            let oldRefresh = Task { await controller.setSchemeEnabled(true, scheme: "Example") }
+            await fulfillment(of: [started], timeout: 2)
+
+            catalog.selectWorkingCopy(containerURL: worktreeURL, forProjectAt: 0)
+            await controller.setSchemeEnabled(true, scheme: "Example")
+            XCTAssertEqual(catalog.selectedProject?.selectedLaunchConfiguration?.selectedDestination?.id, "current")
+            finishOld.signal()
+            await oldRefresh.value
+
+            XCTAssertEqual(catalog.selectedProject?.selectedLaunchConfiguration?.selectedDestination?.id, "current")
+            XCTAssertEqual(catalog.selectedProject?.configurations.first?.availableDestinations.map(\.id), ["current"])
+        }
+    }
+
+    @MainActor
+    func testChangingWorkingCopyIgnoresLateResolutionFailures() async {
+        for destinations in [false, true] {
+            await withCatalog { catalog in
+                let originalURL = URL(fileURLWithPath: "/Projects/Example.xcworkspace")
+                let worktreeURL = URL(fileURLWithPath: "/Worktrees/feature/Example.xcworkspace")
+                catalog.add(originalURL, schemes: ["Example"])
+                let started = expectation(description: "Original resolution started")
+                let finishOld = DispatchSemaphore(value: 0)
+                let resolver = XcodeSchemeResolver { _ in
+                    started.fulfill()
+                    finishOld.wait()
+                    throw TestResolutionError.failed
+                }
+                var failures: [ProjectWindowController.ResolutionFailure] = []
+                let controller = ProjectWindowController(
+                    catalog: catalog, schemeResolver: resolver,
+                    presentResolutionFailure: { failure in
+                        failures.append(failure)
+                        return false
+                    }
+                )
+                controller.loadWindow()
+                let oldRefresh = Task {
+                    if destinations {
+                        await controller.setSchemeEnabled(true, scheme: "Example")
+                    } else {
+                        await controller.refreshSchemes()
+                    }
+                }
+                await fulfillment(of: [started], timeout: 2)
+                catalog.selectWorkingCopy(containerURL: worktreeURL, forProjectAt: 0)
+                finishOld.signal()
+                await oldRefresh.value
+
+                XCTAssertTrue(failures.isEmpty)
+                XCTAssertEqual(catalog.selectedProject?.schemes, ["Example"])
+            }
+        }
+    }
+
+    @MainActor
     private func withCatalog(_ body: (ProjectCatalog) throws -> Void) rethrows {
         let suiteName = "ProjectWindowControllerTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

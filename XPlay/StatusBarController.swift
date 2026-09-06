@@ -6,6 +6,67 @@ private final class ConfigurationActionButton: NSButton {
 }
 
 @MainActor
+private final class BranchSelectionCell: NSButtonCell {
+    // Scheme labels have a two-point NSTextField alignment inset.
+    private static let textLeading = 32 - NSTextField(labelWithString: "").alignmentRectInsets.left
+
+    override func titleRect(forBounds bounds: NSRect) -> NSRect {
+        let height = ceil(attributedTitle.size().height)
+        return NSRect(x: bounds.minX + Self.textLeading, y: bounds.midY - height / 2,
+                      width: max(0, bounds.width - Self.textLeading - 12), height: height)
+    }
+
+    override func imageRect(forBounds bounds: NSRect) -> NSRect {
+        NSRect(x: bounds.minX + 12, y: bounds.midY - 6, width: 12, height: 12)
+    }
+}
+
+@MainActor
+private final class BranchSelectionButton: NSButton {
+    var copy: GitWorkingCopy
+
+    init(copy: GitWorkingCopy, target: AnyObject, action: Selector) {
+        self.copy = copy
+        super.init(frame: NSRect(x: 0, y: 0, width: 260, height: 44))
+        cell = BranchSelectionCell(textCell: "")
+        self.target = target
+        self.action = action
+        identifier = NSUserInterfaceItemIdentifier("branch-selection-button")
+        isBordered = false
+        alignment = .left
+        imagePosition = .imageLeading
+        imageHugsTitle = true
+        autoresizingMask = [.width]
+        setButtonType(.momentaryPushIn)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func update(copy: GitWorkingCopy, subtitle: String?, selected: Bool, enabled: Bool) {
+        self.copy = copy
+        isEnabled = enabled
+        let color = enabled ? NSColor.labelColor : .disabledControlTextColor
+        let text = NSMutableAttributedString(string: copy.displayName, attributes: [
+            .font: NSFont.menuFont(ofSize: NSFont.systemFontSize), .foregroundColor: color,
+        ])
+        if let subtitle {
+            text.append(NSAttributedString(string: "\n" + subtitle, attributes: [
+                .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+                .foregroundColor: enabled ? NSColor.secondaryLabelColor : .disabledControlTextColor,
+            ]))
+        }
+        attributedTitle = text
+        image = selected ? NSImage(systemSymbolName: "checkmark", accessibilityDescription: nil)
+            : NSImage(size: NSSize(width: 12, height: 12))
+        image?.size = NSSize(width: 12, height: 12)
+        frame.size = NSSize(width: max(frame.width, ceil(text.size().width) + 48), height: subtitle == nil ? 28 : 44)
+        setAccessibilityLabel([copy.displayName, subtitle].compactMap { $0 }.joined(separator: ", "))
+        setAccessibilityValue(selected ? 1 : 0)
+    }
+}
+
+@MainActor
 private final class ExternalLinkButton: NSButton {
     var externalURL: URL?
 }
@@ -405,6 +466,20 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private let openExternalURL: (URL) -> Void
     private let terminateApplication: @MainActor () -> Void
     private let openDestinationSubmenu: (NSMenuItem) -> Void
+    private let workingCopyResolver: any GitWorkingCopyResolving
+    private let worktreesDirectory: URL
+    private let openProjectInXcode: @MainActor (URL) async throws -> Void
+    private let presentWorkingCopyError: (String) -> Void
+    private var workingCopyStates: [URL: GitRepositoryState] = [:]
+    private var workingCopyErrors: [URL: String] = [:]
+    private var discoveredWorkingCopies = Set<URL>()
+    private var refreshingWorkingCopies = Set<URL>()
+    private var workingCopyRefreshIDs: [URL: UUID] = [:]
+    private var unvalidatedWorkingCopies = Set<URL>()
+    private var isSelectingWorkingCopy = false
+    private var isPreparingAutomaticAction = false
+    private var trackedSubmenus = Set<ObjectIdentifier>()
+    private weak var openMenuButton: NSButton?
     private weak var destinationMenuParent: NSMenuItem?
     private var deferredMenuRefresh = false
     private var refreshingProjectURLs = Set<URL>()
@@ -442,7 +517,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                 )
             }
         }
-        if let projectURL = projectCatalog?.selectedProject?.url {
+        if let projectURL = projectCatalog?.selectedProject?.activeContainerURL {
             let message: String?
             if refreshingProjectURLs.contains(projectURL) {
                 message = "Refreshing destinations…"
@@ -457,6 +532,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                 menu.addItem(item)
             }
         }
+        addWorkingCopyItems(to: menu)
+        menu.addItem(makeCurrentBranchItem())
         menu.addItem(makePlayItem())
         menu.addItem(.separator())
 
@@ -505,6 +582,12 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             selectedIndex: appSettings.rightClickAction == .play ? 0 : 1,
             action: #selector(setRightClickAction(_:))
         ))
+        menu.addItem(makeToggleItem(
+            title: "Automatically Select Latest Branch",
+            isOn: appSettings.automaticallySelectLatestBranch,
+            action: #selector(setAutomaticBranchSelection(_:)),
+            help: "Use the branch with the most recent activity. Turn off to choose a branch manually."
+        ))
         menu.addItem(makeMacroAcceptanceItem())
         menu.addItem(.separator())
 
@@ -522,18 +605,27 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     func menuWillOpen(_ menu: NSMenu) {
-        guard menu === contextMenu else { return }
+        guard menu === contextMenu else {
+            trackedSubmenus.insert(ObjectIdentifier(menu))
+            return
+        }
         Task { [weak self] in
+            await self?.refreshWorkingCopies()
             await self?.refreshDestinations()
         }
     }
 
     func menuDidClose(_ menu: NSMenu) {
-        guard let parent = destinationMenuParent,
-              menu === parent.submenu || menu === parent.menu else { return }
-        parent.submenu = nil
-        destinationMenuParent = nil
-        if deferredMenuRefresh {
+        trackedSubmenus.remove(ObjectIdentifier(menu))
+        if menu === contextMenu {
+            trackedSubmenus.removeAll()
+        }
+        if let parent = destinationMenuParent,
+           menu === parent.submenu || menu === parent.menu {
+            parent.submenu = nil
+            destinationMenuParent = nil
+        }
+        if deferredMenuRefresh && destinationMenuParent == nil && trackedSubmenus.isEmpty {
             deferredMenuRefresh = false
             rebuildContextMenu()
         }
@@ -542,14 +634,15 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     func refreshDestinations() async {
         guard let project = projectCatalog?.selectedProject,
               !project.enabledConfigurations.isEmpty,
-              refreshingProjectURLs.insert(project.url).inserted else {
+              refreshingProjectURLs.insert(project.activeContainerURL).inserted else {
             return
         }
-        destinationRefreshErrors[project.url] = nil
+        destinationRefreshErrors[project.activeContainerURL] = nil
         rebuildContextMenu()
         refreshConfiguration()
         defer {
-            refreshingProjectURLs.remove(project.url)
+            refreshingProjectURLs.remove(project.activeContainerURL)
+            unvalidatedWorkingCopies.remove(project.activeContainerURL)
             rebuildContextMenu()
             refreshConfiguration()
         }
@@ -558,10 +651,12 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             do {
                 let destinations = try await Task.detached(priority: .userInitiated) {
                     try resolver.destinations(
-                        for: project.url, kind: project.kind, scheme: configuration.scheme
+                        for: project.activeContainerURL, kind: project.kind, scheme: configuration.scheme
                     )
                 }.value
-                guard let index = projectCatalog?.projects.firstIndex(where: { $0.url == project.url }),
+                guard let index = projectCatalog?.projects.firstIndex(where: {
+                    $0.url == project.url && $0.activeContainerURL == project.activeContainerURL
+                }),
                       projectCatalog?.projects[index].enabledConfigurations.contains(where: {
                           $0.scheme == configuration.scheme
                       }) == true else {
@@ -570,15 +665,16 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                 projectCatalog?.updateDestinations(destinations, scheme: configuration.scheme, forProjectAt: index)
                 onCatalogChange?()
             } catch {
-                destinationRefreshErrors[project.url, default: []].insert(configuration.scheme)
+                destinationRefreshErrors[project.activeContainerURL, default: []].insert(configuration.scheme)
             }
         }
     }
 
     private func rebuildContextMenu() {
         // Replacing the row while its submenu is tracking would dismiss the picker.
-        guard destinationMenuParent == nil else {
+        guard destinationMenuParent == nil && trackedSubmenus.isEmpty else {
             deferredMenuRefresh = true
+            refreshVisibleBranchSelection()
             return
         }
         let menu = contextMenu
@@ -593,9 +689,10 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private var destinationsAreReady: Bool {
         guard let project = projectCatalog?.selectedProject else { return false }
         let selectionFailed = project.selectedLaunchConfiguration.map {
-            destinationRefreshErrors[project.url]?.contains($0.scheme) == true
+            destinationRefreshErrors[project.activeContainerURL]?.contains($0.scheme) == true
         } ?? false
-        return !refreshingProjectURLs.contains(project.url) && !selectionFailed
+        return !refreshingProjectURLs.contains(project.activeContainerURL)
+            && !unvalidatedWorkingCopies.contains(project.activeContainerURL) && !selectionFailed
     }
 
     func menu(_ menu: NSMenu, willHighlight item: NSMenuItem?) {
@@ -703,7 +800,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             ],
             destinationMenu: destinationMenu,
             selectSchemeAction: #selector(selectLaunchConfiguration(_:)),
-            showDestinationMenuAction: #selector(showDestinationMenu(_:))
+            showDestinationMenuAction: #selector(showButtonSubmenu(_:))
         )
         return row
     }
@@ -713,7 +810,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         item.target = self
         let row = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 54))
         row.autoresizingMask = [.width]
-        let playButton = NSButton(title: "Run Project", target: self, action: #selector(playFromMenu))
+        let playButton = NSButton(title: "Run", target: self, action: #selector(playFromMenu))
         playButton.identifier = NSUserInterfaceItemIdentifier("run-project-button")
         playButton.bezelStyle = .rounded
         playButton.controlSize = .large
@@ -735,6 +832,14 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         spinner.translatesAutoresizingMaskIntoConstraints = false
         playButton.addSubview(spinner)
 
+        let openButton = NSButton(title: "Open", target: self, action: #selector(openFromMenu))
+        openButton.identifier = NSUserInterfaceItemIdentifier("open-project-button")
+        openButton.bezelStyle = .rounded
+        openButton.controlSize = .large
+        openButton.font = .systemFont(ofSize: 16, weight: .medium)
+        openButton.toolTip = "Open the selected working copy in Xcode"
+        openButton.translatesAutoresizingMaskIntoConstraints = false
+
         let stopButton = CompactStopButton(
             title: "",
             target: self,
@@ -754,12 +859,17 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         stopButton.translatesAutoresizingMaskIntoConstraints = false
 
         row.addSubview(playButton)
+        row.addSubview(openButton)
         row.addSubview(stopButton)
         NSLayoutConstraint.activate([
             playButton.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 12),
-            playButton.trailingAnchor.constraint(equalTo: stopButton.leadingAnchor, constant: -8),
+            playButton.trailingAnchor.constraint(equalTo: openButton.leadingAnchor, constant: -8),
             playButton.centerYAnchor.constraint(equalTo: row.centerYAnchor),
             playButton.heightAnchor.constraint(equalToConstant: 38),
+            openButton.trailingAnchor.constraint(equalTo: stopButton.leadingAnchor, constant: -8),
+            openButton.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            openButton.widthAnchor.constraint(equalTo: playButton.widthAnchor),
+            openButton.heightAnchor.constraint(equalToConstant: 38),
             stopButton.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
             stopButton.centerYAnchor.constraint(equalTo: row.centerYAnchor),
             stopButton.widthAnchor.constraint(equalToConstant: 44),
@@ -772,6 +882,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         item.view = row
         playMenuItem = item
         playMenuButton = playButton
+        openMenuButton = openButton
         playMenuSpinner = spinner
         stopMenuButton = stopButton
         updateLaunchButtons()
@@ -779,11 +890,13 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     private func updateLaunchButtons() {
-        let canStart = !isRunning && destinationsAreReady && projectCatalog?.selectedProject?
+        let canStart = !isRunning && canUseSelectedWorkingCopy && destinationsAreReady && projectCatalog?.selectedProject?
             .selectedLaunchConfiguration?.isSelectedDestinationAvailable == true
         let canStop = isRunning && activeLauncher != nil
-        playMenuItem?.isEnabled = canStart || canStop
+        let canOpen = projectCatalog?.selectedProject != nil && canUseSelectedWorkingCopy
+        playMenuItem?.isEnabled = canStart || canStop || canOpen
         playMenuButton?.isEnabled = canStart
+        openMenuButton?.isEnabled = canOpen
         stopMenuButton?.isEnabled = canStop
         playMenuSpinner?.isHidden = !isRunning
         if isRunning {
@@ -947,9 +1060,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         return item
     }
 
-    private func makeSectionHeaderItem(title: String, showsEditButton: Bool = false) -> NSMenuItem {
+    private func makeSectionHeaderItem(
+        title: String, showsEditButton: Bool = false, overflowMenu: NSMenu? = nil
+    ) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        item.isEnabled = showsEditButton && onEditProjects != nil
+        item.isEnabled = overflowMenu != nil || (showsEditButton && onEditProjects != nil)
 
         let headerView = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 28))
         headerView.autoresizingMask = [.width]
@@ -966,7 +1081,20 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             titleLabel.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
         ])
 
-        if showsEditButton {
+        if let overflowMenu {
+            let moreButton = NSButton(title: "Show More…", target: self, action: #selector(showButtonSubmenu(_:)))
+            moreButton.identifier = NSUserInterfaceItemIdentifier("show-more-branches")
+            moreButton.menu = overflowMenu
+            moreButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+            moreButton.isBordered = false
+            moreButton.translatesAutoresizingMaskIntoConstraints = false
+            headerView.addSubview(moreButton)
+            NSLayoutConstraint.activate([
+                moreButton.trailingAnchor.constraint(equalTo: headerView.trailingAnchor, constant: -8),
+                moreButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
+                titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: moreButton.leadingAnchor, constant: -8),
+            ])
+        } else if showsEditButton {
             let editButton = NSButton(title: "Edit", target: self, action: #selector(editProjects))
             editButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
             editButton.isBordered = false
@@ -990,25 +1118,32 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     private func makeMacroAcceptanceItem() -> NSMenuItem {
-        let item = NSMenuItem(title: "Accept Macros", action: nil, keyEquivalent: "")
+        makeToggleItem(title: "Accept Macros", isOn: appSettings.acceptsMacros,
+                       action: #selector(setMacroAcceptance(_:)), help: Self.macroWarningText)
+    }
+
+    private func makeToggleItem(title: String, isOn: Bool, action: Selector, help: String) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         item.isEnabled = true
 
         let rowView = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 32))
         rowView.autoresizingMask = [.width]
 
-        let label = NSTextField(labelWithString: "Accept Macros")
+        let label = NSTextField(labelWithString: title)
         label.font = .menuFont(ofSize: NSFont.systemFontSize)
         label.translatesAutoresizingMaskIntoConstraints = false
 
         let toggle = NSSwitch(frame: .zero)
         toggle.controlSize = .small
-        toggle.state = appSettings.acceptsMacros ? .on : .off
+        toggle.state = isOn ? .on : .off
         toggle.target = self
-        toggle.action = #selector(setMacroAcceptance(_:))
-        toggle.toolTip = Self.macroWarningText
-        toggle.setAccessibilityLabel("Accept Macros")
+        toggle.action = action
+        toggle.toolTip = help
+        toggle.setAccessibilityLabel(title)
         toggle.translatesAutoresizingMaskIntoConstraints = false
 
+        rowView.frame.size.width = max(260, ceil(label.intrinsicContentSize.width
+            + toggle.intrinsicContentSize.width + 36))
         rowView.addSubview(label)
         rowView.addSubview(toggle)
 
@@ -1048,6 +1183,25 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         terminateApplication: @escaping @MainActor () -> Void = { NSApp.terminate(nil) },
         openDestinationSubmenu: @escaping (NSMenuItem) -> Void = { item in
             item.accessibilityPerformPress()
+        },
+        workingCopyResolver: any GitWorkingCopyResolving = GitWorkingCopyResolver(),
+        worktreesDirectory: URL = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        )[0].appendingPathComponent("XPlay/Worktrees", isDirectory: true),
+        openProjectInXcode: @escaping @MainActor (URL) async throws -> Void = { url in
+            guard let xcode = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.dt.Xcode") else {
+                throw CocoaError(.fileNoSuchFile, userInfo: [NSLocalizedDescriptionKey: "Xcode is not installed."])
+            }
+            _ = try await NSWorkspace.shared.open(
+                [url], withApplicationAt: xcode, configuration: NSWorkspace.OpenConfiguration()
+            )
+        },
+        presentWorkingCopyError: @escaping (String) -> Void = { message in
+            let alert = NSAlert()
+            alert.messageText = "Could not use this working copy"
+            alert.informativeText = message
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
         }
     ) {
         self.projectCatalog = projectCatalog
@@ -1063,6 +1217,10 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         self.openExternalURL = openExternalURL
         self.terminateApplication = terminateApplication
         self.openDestinationSubmenu = openDestinationSubmenu
+        self.workingCopyResolver = workingCopyResolver
+        self.worktreesDirectory = worktreesDirectory
+        self.openProjectInXcode = openProjectInXcode
+        self.presentWorkingCopyError = presentWorkingCopyError
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItemView = StatusItemView()
 
@@ -1163,9 +1321,17 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         }
     }
 
-    private func startProject() {
+    private func startProject(refreshLatestBranch: Bool = true) {
+        if refreshLatestBranch && appSettings.automaticallySelectLatestBranch {
+            Task { [weak self] in
+                guard let self, await self.prepareAutomaticAction() else { return }
+                self.startProject(refreshLatestBranch: false)
+            }
+            return
+        }
         guard
             !isRunning,
+            canUseSelectedWorkingCopy,
             destinationsAreReady,
             let project = projectCatalog?.selectedProject,
             let configuration = project.selectedLaunchConfiguration,
@@ -1277,6 +1443,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         contextMenu = makeContextMenu()
         refreshConfiguration()
         Task { [weak self] in
+            await self?.refreshWorkingCopies()
             await self?.refreshDestinations()
         }
     }
@@ -1333,14 +1500,14 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     @objc
-    private func showDestinationMenu(_ button: NSButton) {
+    private func showButtonSubmenu(_ button: NSButton) {
         guard let menu = button.menu, let item = button.enclosingMenuItem else { return }
         destinationMenuParent?.submenu = nil
         destinationMenuParent = item
         menu.delegate = self
         item.submenu = menu
-        // Attach only for device selection; otherwise AppKit takes over the whole
-        // row and prevents the independent scheme button from receiving clicks.
+        // Attach only while the accessory menu is open, so the row keeps its
+        // independent buttons instead of becoming a full-row submenu trigger.
         openDestinationSubmenu(item)
     }
 
@@ -1397,7 +1564,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         let project = projectCatalog?.selectedProject
         let configuration = project?.selectedLaunchConfiguration
         let destination = activeLaunchPlan?.destination ?? configuration?.selectedDestination
-        let canStart = destinationsAreReady && configuration?.isSelectedDestinationAvailable == true
+        let canStart = canUseSelectedWorkingCopy && destinationsAreReady && configuration?.isSelectedDestinationAvailable == true
         let description: String
         if let plan = activeLaunchPlan {
             description = "Building and launching \(plan.scheme)…"
@@ -1443,5 +1610,274 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         image?.accessibilityDescription = description
         image?.isTemplate = true
         return image
+    }
+}
+
+private extension StatusBarController {
+    func currentWorkingCopy(for project: SavedProject) -> GitWorkingCopy? {
+        workingCopyStates[project.url]?.workingCopies.first {
+            $0.containerURL?.resolvingSymlinksInPath().standardizedFileURL
+                == project.activeContainerURL.resolvingSymlinksInPath().standardizedFileURL
+        }
+    }
+
+    var canUseSelectedWorkingCopy: Bool {
+        guard !isSelectingWorkingCopy, !isPreparingAutomaticAction,
+              let project = projectCatalog?.selectedProject else { return false }
+        if appSettings.automaticallySelectLatestBranch && workingCopyErrors[project.url] != nil { return false }
+        guard project.selectedWorkingCopyURL != nil else { return true }
+        return workingCopyErrors[project.url] == nil && currentWorkingCopy(for: project) != nil
+            && FileManager.default.fileExists(atPath: project.activeContainerURL.path)
+    }
+
+    func addWorkingCopyItems(to menu: NSMenu) {
+        guard let project = projectCatalog?.selectedProject else { return }
+        if let error = workingCopyErrors[project.url] {
+            let item = NSMenuItem(title: "Could not read branches. Reopen menu to retry.",
+                                  action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            item.toolTip = error
+            menu.addItem(item)
+        }
+        guard let state = workingCopyStates[project.url] else {
+            if !discoveredWorkingCopies.contains(project.url) {
+                let item = NSMenuItem(title: "Loading branches…", action: nil, keyEquivalent: "")
+                item.isEnabled = false
+                menu.addItem(item)
+            }
+            return
+        }
+        var overflowMenu: NSMenu?
+        if state.workingCopies.count > 3 {
+            let submenu = NSMenu(title: "Branches")
+            submenu.autoenablesItems = false
+            submenu.delegate = self
+            for copy in state.workingCopies.dropFirst(3) {
+                submenu.addItem(makeWorkingCopyItem(copy, project: project))
+            }
+            overflowMenu = submenu
+        }
+        menu.addItem(makeSectionHeaderItem(title: "Recent Branches", overflowMenu: overflowMenu))
+        for copy in state.workingCopies.prefix(3) {
+            menu.addItem(makeWorkingCopyItem(copy, project: project))
+        }
+    }
+
+    func makeWorkingCopyItem(_ copy: GitWorkingCopy, project: SavedProject) -> NSMenuItem {
+        let item = NSMenuItem(title: copy.displayName, action: #selector(selectWorkingCopyFromMenu(_:)), keyEquivalent: "")
+        item.subtitle = copy.isMainWorktree ? nil : (copy.rootURL == nil ? "New Worktree" : "Worktree")
+        item.identifier = NSUserInterfaceItemIdentifier("working-copy")
+        item.representedObject = copy.id
+        item.target = self
+        let row = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: item.subtitle == nil ? 28 : 44))
+        row.autoresizingMask = [.width]
+        let button = BranchSelectionButton(copy: copy, target: self, action: #selector(selectWorkingCopyButton(_:)))
+        row.addSubview(button)
+        item.view = row
+        item.state = currentWorkingCopy(for: project)?.id == copy.id ? .on : .off
+        item.isEnabled = !isSelectingWorkingCopy && !isRunning && !appSettings.automaticallySelectLatestBranch
+            && (copy.rootURL == nil || copy.containerURL != nil)
+        item.toolTip = workingCopyToolTip(copy)
+        button.update(copy: copy, subtitle: item.subtitle,
+            selected: item.state == .on, enabled: item.isEnabled)
+        row.frame.size = button.frame.size
+        button.frame = row.bounds
+        button.toolTip = item.toolTip
+        return item
+    }
+
+    func workingCopyToolTip(_ copy: GitWorkingCopy) -> String {
+        let date = DateFormatter.localizedString(from: copy.lastActivity, dateStyle: .medium, timeStyle: .short)
+        return [copy.displayName, copy.rootURL?.path ?? "Create a separate worktree when selected",
+                copy.isDirty ? "Modified" : nil, "Last activity: \(date)"]
+            .compactMap { $0 }.joined(separator: "\n")
+    }
+
+    func refreshVisibleBranchSelection() {
+        guard let project = projectCatalog?.selectedProject else { return }
+        let copies = workingCopyStates[project.url]?.workingCopies ?? []
+        var visited = Set<ObjectIdentifier>()
+        func refresh(_ menu: NSMenu) {
+            guard visited.insert(ObjectIdentifier(menu)).inserted else { return }
+            for item in menu.items {
+                if let button = item.view?.subviews.compactMap({ $0 as? BranchSelectionButton }).first {
+                    // Preparing a new worktree changes its identity from branch to path.
+                    let copy = copies.first { $0.id == button.copy.id }
+                        ?? copies.first { button.copy.rootURL == nil && $0.branchName == button.copy.branchName }
+                        ?? button.copy
+                    item.representedObject = copy.id
+                    item.subtitle = copy.isMainWorktree ? nil : (copy.rootURL == nil ? "New Worktree" : "Worktree")
+                    item.state = currentWorkingCopy(for: project)?.id == copy.id ? .on : .off
+                    item.isEnabled = !isSelectingWorkingCopy && !isRunning && !appSettings.automaticallySelectLatestBranch
+                        && (copy.rootURL == nil || copy.containerURL != nil)
+                    button.update(copy: copy, subtitle: item.subtitle, selected: item.state == .on, enabled: item.isEnabled)
+                    item.toolTip = workingCopyToolTip(copy)
+                    button.toolTip = item.toolTip
+                }
+                if let submenu = item.submenu { refresh(submenu) }
+                for button in item.view?.subviews.compactMap({ $0 as? NSButton }) ?? [] {
+                    if let submenu = button.menu { refresh(submenu) }
+                }
+            }
+        }
+        refresh(contextMenu)
+        if let header = contextMenu.items.first(where: { $0.identifier?.rawValue == "current-branch" }) {
+            let replacement = makeCurrentBranchItem()
+            header.title = replacement.title
+            header.toolTip = replacement.toolTip
+            header.view?.subviews.compactMap { $0 as? NSTextField }.first?.stringValue = replacement.title
+        }
+    }
+
+    func makeCurrentBranchItem() -> NSMenuItem {
+        let title: String
+        if isSelectingWorkingCopy {
+            title = "Preparing working copy…"
+        } else if let project = projectCatalog?.selectedProject {
+            if workingCopyErrors[project.url] != nil {
+                title = "Branch unavailable"
+            } else if let copy = currentWorkingCopy(for: project) {
+                title = "Branch: \(copy.displayName)"
+            } else if project.selectedWorkingCopyURL != nil {
+                title = "Working copy unavailable"
+            } else if !discoveredWorkingCopies.contains(project.url) {
+                title = "Branch: Loading…"
+            } else {
+                title = "Local project · No Git repository"
+            }
+        } else {
+            title = "Branch: —"
+        }
+        let item = makeSectionHeaderItem(title: title)
+        item.identifier = NSUserInterfaceItemIdentifier("current-branch")
+        item.toolTip = projectCatalog?.selectedProject?.activeContainerURL.path
+        return item
+    }
+
+    @objc func setAutomaticBranchSelection(_ toggle: NSSwitch) {
+        appSettings.setAutomaticallySelectLatestBranch(toggle.state == .on)
+        rebuildContextMenu()
+        refreshConfiguration()
+        if appSettings.automaticallySelectLatestBranch {
+            Task { [weak self] in await self?.refreshWorkingCopies(force: true) }
+        }
+    }
+
+    func prepareAutomaticAction() async -> Bool {
+        guard !isPreparingAutomaticAction, !isSelectingWorkingCopy,
+              let project = projectCatalog?.selectedProject else { return false }
+        isPreparingAutomaticAction = true
+        refreshConfiguration()
+        defer {
+            isPreparingAutomaticAction = false
+            refreshConfiguration()
+        }
+        await refreshWorkingCopies(force: true)
+        await refreshDestinations()
+        return projectCatalog?.selectedProject?.url == project.url && workingCopyErrors[project.url] == nil
+    }
+
+    @objc func selectWorkingCopyFromMenu(_ item: NSMenuItem) {
+        guard let id = item.representedObject as? String else { return }
+        Task { [weak self] in await self?.selectWorkingCopy(id: id) }
+    }
+
+    @objc func selectWorkingCopyButton(_ button: BranchSelectionButton) {
+        Task { [weak self] in await self?.selectWorkingCopy(id: button.copy.id) }
+    }
+
+    @objc func openFromMenu() {
+        contextMenu.cancelTracking()
+        Task { [weak self] in await self?.openSelectedProject() }
+    }
+}
+
+extension StatusBarController {
+    func refreshWorkingCopies(force: Bool = false, selectLatest: Bool = true) async {
+        guard let project = projectCatalog?.selectedProject else { return }
+        guard force || !refreshingWorkingCopies.contains(project.url) else { return }
+        let requestID = UUID()
+        workingCopyRefreshIDs[project.url] = requestID
+        refreshingWorkingCopies.insert(project.url)
+        let resolver = workingCopyResolver
+        defer {
+            if workingCopyRefreshIDs[project.url] == requestID {
+                refreshingWorkingCopies.remove(project.url)
+                rebuildContextMenu()
+                refreshConfiguration()
+            }
+        }
+        do {
+            let state = try await Task.detached(priority: .userInitiated) {
+                try resolver.discover(containerURL: project.url)
+            }.value
+            guard workingCopyRefreshIDs[project.url] == requestID else { return }
+            workingCopyStates[project.url] = state
+            workingCopyErrors[project.url] = nil
+            discoveredWorkingCopies.insert(project.url)
+            if selectLatest, appSettings.automaticallySelectLatestBranch, !isRunning,
+               projectCatalog?.selectedProject?.url == project.url,
+               let latest = state?.workingCopies.first(where: { $0.rootURL == nil || $0.containerURL != nil }),
+               let selected = projectCatalog?.selectedProject,
+               currentWorkingCopy(for: selected)?.id != latest.id {
+                await selectWorkingCopy(id: latest.id, automatic: true)
+            }
+        } catch {
+            guard workingCopyRefreshIDs[project.url] == requestID else { return }
+            workingCopyErrors[project.url] = error.localizedDescription
+            discoveredWorkingCopies.insert(project.url)
+        }
+    }
+
+    func selectWorkingCopy(id: String, automatic: Bool = false) async {
+        guard !isSelectingWorkingCopy, !isRunning,
+              let project = projectCatalog?.selectedProject,
+              let copy = workingCopyStates[project.url]?.workingCopies.first(where: { $0.id == id }) else { return }
+        isSelectingWorkingCopy = true
+        rebuildContextMenu()
+        refreshConfiguration()
+        let resolver = workingCopyResolver
+        let directory = worktreesDirectory
+        do {
+            let container = try await Task.detached(priority: .userInitiated) {
+                try resolver.prepare(copy, for: project.url, worktreesDirectory: directory)
+            }.value
+            guard (!automatic || appSettings.automaticallySelectLatestBranch),
+                  projectCatalog?.selectedProject?.url == project.url,
+                  let index = projectCatalog?.projects.firstIndex(where: { $0.url == project.url }) else {
+                isSelectingWorkingCopy = false
+                rebuildContextMenu()
+                refreshConfiguration()
+                return
+            }
+            let isOriginal = container.resolvingSymlinksInPath().standardizedFileURL
+                == project.url.resolvingSymlinksInPath().standardizedFileURL
+            projectCatalog?.selectWorkingCopy(containerURL: isOriginal ? nil : container, forProjectAt: index)
+            if let selected = projectCatalog?.selectedProject {
+                unvalidatedWorkingCopies.insert(selected.activeContainerURL)
+            }
+            onCatalogChange?()
+            isSelectingWorkingCopy = false
+            await refreshWorkingCopies(force: true, selectLatest: false)
+            await refreshDestinations()
+        } catch {
+            isSelectingWorkingCopy = false
+            if automatic { workingCopyErrors[project.url] = error.localizedDescription }
+            rebuildContextMenu()
+            refreshConfiguration()
+            presentWorkingCopyError(error.localizedDescription)
+        }
+    }
+
+    func openSelectedProject() async {
+        if appSettings.automaticallySelectLatestBranch && !isRunning {
+            guard await prepareAutomaticAction() else { return }
+        }
+        guard canUseSelectedWorkingCopy, let project = projectCatalog?.selectedProject else { return }
+        do {
+            try await openProjectInXcode(project.activeContainerURL)
+        } catch {
+            presentWorkingCopyError(error.localizedDescription)
+        }
     }
 }

@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+## 1.1.0 — 2026-09-06
+
+### Added
+
+- Show the three most recently active local branches and worktrees, with the
+  remaining entries available through Show More in the section header.
+- Open the selected project's working copy in Xcode with the new Open button
+  beside Run. The current branch appears above both buttons.
+- Reuse existing worktrees or create a separate worktree for a branch without
+  one, preserving the original checkout and its uncommitted changes.
+- Add Automatically Select Latest Branch in Settings, disabled by default.
+  Run and Open refresh the selection when enabled; active builds keep their
+  working copy.
+
+### Changed
+
+- Keep the menu open when clicking a branch, updating its checkmark and current
+  branch label in place, including selections from Show More.
+- Display branch names with small worktree subtitles and align their text and
+  checkmarks with scheme rows.
+- Persist the selected working copy per project and use it consistently for
+  schemes, devices, builds, logs, and Xcode opening.
+
+### Fixed
+
+- Ignore stale scheme and destination responses after changing working copies.
+- Show Git discovery failures and unavailable working copies without silently
+  launching the original checkout.
+- Keep multiple worktrees of the same branch separately selectable.
+
 ## 1.0.2 — 2026-09-05
 
 ### Fixed

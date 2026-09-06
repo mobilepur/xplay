@@ -5,6 +5,30 @@ import XCTest
 
 final class StatusBarControllerTests: XCTestCase {
     @MainActor
+    func testRunAndOpenShareAnActionRowBelowTheCurrentBranch() throws {
+        let controller = StatusBarController()
+        let menu = controller.contextMenu
+        let row = try XCTUnwrap(menu.items.first { $0.title == "Run Project" }?.view)
+        let open = try XCTUnwrap(descendants(of: row).compactMap { $0 as? NSButton }.first {
+            $0.identifier?.rawValue == "open-project-button"
+        })
+        let run = try XCTUnwrap(descendants(of: row).compactMap { $0 as? NSButton }.first {
+            $0.identifier?.rawValue == "run-project-button"
+        })
+        XCTAssertEqual(open.title, "Open")
+        XCTAssertEqual(run.title, "Run")
+        let branchIndex = try XCTUnwrap(menu.items.firstIndex {
+            $0.identifier?.rawValue == "current-branch"
+        })
+        let runIndex = try XCTUnwrap(menu.items.firstIndex { $0.title == "Run Project" })
+        XCTAssertEqual(branchIndex + 1, runIndex)
+        row.frame.size.width = 400
+        row.layoutSubtreeIfNeeded()
+        XCTAssertLessThan(run.alignmentRect(forFrame: run.frame).maxX,
+                          open.alignmentRect(forFrame: open.frame).minX)
+    }
+
+    @MainActor
     func testRightMouseUpMapsToContextMenu() {
         XCTAssertEqual(
             StatusBarController.interaction(for: .rightMouseUp),
@@ -138,7 +162,7 @@ final class StatusBarControllerTests: XCTestCase {
             let item = try XCTUnwrap(controller.contextMenu.items.first { $0.title == "Run Project" })
             let row = try XCTUnwrap(item.view)
             let buttons = descendants(of: row).compactMap { $0 as? NSButton }
-            let play = try XCTUnwrap(buttons.first { $0.title == "Run Project" })
+            let play = try XCTUnwrap(buttons.first { $0.identifier?.rawValue == "run-project-button" })
             let stop = try XCTUnwrap(buttons.first {
                 $0.identifier?.rawValue == "stop-project-button"
             })
@@ -155,10 +179,13 @@ final class StatusBarControllerTests: XCTestCase {
             let playAlignmentRect = play.alignmentRect(forFrame: play.frame)
             let stopAlignmentRect = stop.alignmentRect(forFrame: stop.frame)
             XCTAssertGreaterThanOrEqual(row.frame.height, 48)
-            XCTAssertEqual(stopAlignmentRect.minX - playAlignmentRect.maxX, 8, accuracy: 0.5)
+            let open = try XCTUnwrap(buttons.first { $0.identifier?.rawValue == "open-project-button" })
+            let openRect = open.alignmentRect(forFrame: open.frame)
+            XCTAssertEqual(openRect.minX - playAlignmentRect.maxX, 8, accuracy: 0.5)
+            XCTAssertEqual(stopAlignmentRect.minX - openRect.maxX, 8, accuracy: 0.5)
             XCTAssertGreaterThanOrEqual(playAlignmentRect.width, play.intrinsicContentSize.width)
             XCTAssertEqual(stopAlignmentRect.width, 44, accuracy: 0.5)
-            XCTAssertEqual(play.title, "Run Project")
+            XCTAssertEqual(play.title, "Run")
             XCTAssertEqual(play.font, .systemFont(ofSize: 16, weight: .medium))
             XCTAssertEqual(play.image?.name(), NSImage.Name("XPlayIcon"))
             XCTAssertEqual(play.image?.size, NSSize(width: 21, height: 18))
@@ -186,7 +213,7 @@ final class StatusBarControllerTests: XCTestCase {
             XCTAssertFalse(play.isEnabled)
             XCTAssertTrue(stop.isEnabled)
             XCTAssertTrue(item.isEnabled)
-            XCTAssertEqual(play.title, "Run Project")
+            XCTAssertEqual(play.title, "Run")
             XCTAssertFalse(spinner.isHidden)
             stop.performClick(nil)
             XCTAssertEqual(plans.count, 1)
@@ -333,11 +360,11 @@ final class StatusBarControllerTests: XCTestCase {
             items.map(\.title),
             [
                 "No project selected",
-                "Run Project",
+                "Branch: —", "Run Project",
                 "",
                 "Projects", "No projects yet",
                 "",
-                "Settings", "Menu Bar Icon", "Left Click", "Right Click", "Accept Macros",
+                "Settings", "Menu Bar Icon", "Left Click", "Right Click", "Automatically Select Latest Branch", "Accept Macros",
                 "",
                 "About", "XPlay", "Report a Problem…",
                 "",
@@ -1201,7 +1228,7 @@ final class StatusBarControllerTests: XCTestCase {
         let playRow = try XCTUnwrap(controller.contextMenu.items.first { $0.title == "Run Project" }?.view)
         let play = try XCTUnwrap(
             descendants(of: playRow).compactMap { $0 as? NSButton }.first {
-                $0.title == "Run Project"
+                $0.identifier?.rawValue == "run-project-button"
             }
         )
 
@@ -1224,7 +1251,7 @@ final class StatusBarControllerTests: XCTestCase {
 
             XCTAssertEqual(device.image?.accessibilityDescription, "iPad")
             XCTAssertTrue(play.isEnabled)
-            XCTAssertEqual(play.title, "Run Project")
+            XCTAssertEqual(play.title, "Run")
             XCTAssertTrue(views.filter {
                 $0.identifier?.rawValue.hasPrefix("running-dot-") == true
             }.allSatisfy { $0.layer?.animation(forKey: "pulse") == nil })
@@ -1330,7 +1357,7 @@ final class StatusBarControllerTests: XCTestCase {
         XCTAssertTrue(destinationButton.menu?.items.contains { $0.title == "New iPhone" } == true)
         let runRow = try XCTUnwrap(menu.items.first { $0.title == "Run Project" }?.view)
         XCTAssertFalse(try XCTUnwrap(descendants(of: runRow).compactMap { $0 as? NSButton }.first {
-            $0.title == "Run Project"
+            $0.identifier?.rawValue == "run-project-button"
         }).isEnabled)
     }
 
