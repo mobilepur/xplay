@@ -226,7 +226,10 @@ final class GitWorkingCopyResolver: GitWorkingCopyResolving, @unchecked Sendable
     }
 
     private func canonical(_ url: URL) -> URL {
-        URL(fileURLWithPath: url.path, isDirectory: false).resolvingSymlinksInPath().standardizedFileURL
+        let resolved = url.resolvingSymlinksInPath().standardizedFileURL
+        // Resolving an existing directory can restore its directory hint on macOS 15.
+        // Strip it last so a planned worktree and the created folder compare equally.
+        return URL(fileURLWithPath: resolved.path, isDirectory: false)
     }
 
     private func relativePath(_ url: URL, within root: URL) throws -> String {

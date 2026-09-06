@@ -25,6 +25,9 @@ final class GitWorkingCopyResolverTests: XCTestCase {
         let state = try XCTUnwrap(GitWorkingCopyResolver().discover(containerURL: featureRoot.appendingPathComponent(repo.relativeContainer)))
 
         XCTAssertEqual(state.rootURL.path, repo.root.path)
+        XCTAssertFalse(state.rootURL.hasDirectoryPath)
+        XCTAssertTrue(state.workingCopies.compactMap(\.rootURL).allSatisfy { !$0.hasDirectoryPath },
+                      "Worktree identity must not depend on whether its directory already exists")
         XCTAssertEqual(state.workingCopies.count, 4)
         let main = try XCTUnwrap(state.workingCopies.first { $0.branchName == "main" })
         XCTAssertTrue(main.isMainWorktree)
