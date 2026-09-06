@@ -151,6 +151,44 @@ final class StatusBarControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testMenuHeightStaysStableDuringLaunchAndDestinationRefresh() async throws {
+        try await withState { catalog, settings in
+            let mac = XcodeDestination(platform: .macOS, id: "mac", name: "My Mac")
+            configure(catalog, schemes: ["Example-macOS"], destinations: [[mac]])
+            let started = expectation(description: "Discovery started")
+            let resume = DispatchSemaphore(value: 0)
+            let resolver = XcodeSchemeResolver { _ in
+                started.fulfill()
+                resume.wait()
+                return Data("{ platform:macOS, id:mac, name:My Mac }".utf8)
+            }
+            let controller = StatusBarController(projectCatalog: catalog, appSettings: settings,
+                schemeResolver: resolver, makeLauncher: { _ in DeferredProjectLauncher() })
+            let menu = controller.contextMenu
+            let idleHeight = menu.size.height
+            controller.perform(.startProject)
+            XCTAssertEqual(menu.size.height, idleHeight)
+
+            // Opening the menu during a build refreshes destinations asynchronously.
+            let refresh = Task { await controller.refreshDestinations() }
+            await fulfillment(of: [started], timeout: 2)
+            let refreshingHeight = menu.size.height
+            let refreshingRow = menu.items.first { $0.title == "Example-macOS" }?.view
+            let showsRefresh = refreshingRow.map {
+                descendants(of: $0).compactMap { $0 as? NSTextField }
+                    .contains { $0.stringValue == "Refreshing…" }
+            } ?? false
+            resume.signal()
+            await refresh.value
+            XCTAssertTrue(showsRefresh)
+            XCTAssertEqual(refreshingHeight, idleHeight)
+            XCTAssertEqual(menu.size.height, idleHeight)
+            controller.perform(.startProject)
+            XCTAssertEqual(menu.size.height, idleHeight)
+        }
+    }
+
+    @MainActor
     func testRunAndStopButtonsLaunchAndCancelSelection() throws {
         try withState { catalog, settings in
             var plans: [XcodeProjectLaunchPlan] = []
@@ -1296,9 +1334,13 @@ final class StatusBarControllerTests: XCTestCase {
                 $0.title == "Second" && $0.action != nil
             }
         )
-        let menu = try XCTUnwrap(secondProjectItem.menu)
-
-        menu.performActionForItem(at: menu.index(of: secondProjectItem))
+        let projectButton = try XCTUnwrap(secondProjectItem.view?.subviews.compactMap { $0 as? NSButton }.first {
+            $0.identifier?.rawValue == "project-selection-button"
+        })
+        projectButton.performClick(nil)
+        XCTAssertEqual(controller.contextMenu.items.filter {
+            $0.view?.subviews.contains { $0.identifier?.rawValue == "project-selection-button" } == true
+        }.map(\.state), [.off, .on])
 
         XCTAssertEqual(editor.projectTableView.selectedRow, 1)
         XCTAssertEqual(editor.schemeTableView.numberOfRows, 1)

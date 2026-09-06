@@ -6,29 +6,14 @@ private final class ConfigurationActionButton: NSButton {
 }
 
 @MainActor
-private final class BranchSelectionCell: NSButtonCell {
-    // Scheme labels have a two-point NSTextField alignment inset.
-    private static let textLeading = 32 - NSTextField(labelWithString: "").alignmentRectInsets.left
-
-    override func titleRect(forBounds bounds: NSRect) -> NSRect {
-        let height = ceil(attributedTitle.size().height)
-        return NSRect(x: bounds.minX + Self.textLeading, y: bounds.midY - height / 2,
-                      width: max(0, bounds.width - Self.textLeading - 12), height: height)
-    }
-
-    override func imageRect(forBounds bounds: NSRect) -> NSRect {
-        NSRect(x: bounds.minX + 12, y: bounds.midY - 6, width: 12, height: 12)
-    }
-}
-
-@MainActor
 private final class BranchSelectionButton: NSButton {
     var copy: GitWorkingCopy
 
     init(copy: GitWorkingCopy, target: AnyObject, action: Selector) {
         self.copy = copy
         super.init(frame: NSRect(x: 0, y: 0, width: 260, height: 44))
-        cell = BranchSelectionCell(textCell: "")
+        title = ""
+        isTransparent = true
         self.target = target
         self.action = action
         identifier = NSUserInterfaceItemIdentifier("branch-selection-button")
@@ -46,21 +31,10 @@ private final class BranchSelectionButton: NSButton {
     func update(copy: GitWorkingCopy, subtitle: String?, selected: Bool, enabled: Bool) {
         self.copy = copy
         isEnabled = enabled
-        let color = enabled ? NSColor.labelColor : .disabledControlTextColor
-        let text = NSMutableAttributedString(string: copy.displayName, attributes: [
-            .font: NSFont.menuFont(ofSize: NSFont.systemFontSize), .foregroundColor: color,
-        ])
-        if let subtitle {
-            text.append(NSAttributedString(string: "\n" + subtitle, attributes: [
-                .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
-                .foregroundColor: enabled ? NSColor.secondaryLabelColor : .disabledControlTextColor,
-            ]))
+        if let row = superview as? MenuDetailItemView {
+            row.updateSelection(title: copy.displayName, subtitle: subtitle, selected: selected, enabled: enabled)
+            frame = row.bounds
         }
-        attributedTitle = text
-        image = selected ? NSImage(systemSymbolName: "checkmark", accessibilityDescription: nil)
-            : NSImage(size: NSSize(width: 12, height: 12))
-        image?.size = NSSize(width: 12, height: 12)
-        frame.size = NSSize(width: max(frame.width, ceil(text.size().width) + 48), height: subtitle == nil ? 28 : 44)
         setAccessibilityLabel([copy.displayName, subtitle].compactMap { $0 }.joined(separator: ", "))
         setAccessibilityValue(selected ? 1 : 0)
     }
@@ -85,6 +59,8 @@ private final class MenuDetailItemView: NSView {
     private let checkmark: NSImageView
     private let chevron: NSImageView
     private var isMenuHighlighted = false
+    private var selectionEnabled = true
+    private var isSelected = false
 
     init(
         title: String,
@@ -101,16 +77,15 @@ private final class MenuDetailItemView: NSView {
 
         super.init(frame: NSRect(x: 0, y: 0, width: 320 + trailingAccessoryWidth, height: 28))
 
+        isSelected = selection == true
         autoresizingMask = [.width]
 
         checkmark.identifier = NSUserInterfaceItemIdentifier("configuration-checkmark")
-        checkmark.image = NSImage(
-            systemSymbolName: "checkmark",
-            accessibilityDescription: nil
-        )
-        checkmark.isHidden = selection != true
+        checkmark.image = selectionImage(selected: selection == true)
+        checkmark.isHidden = selection == nil
         checkmark.translatesAutoresizingMaskIntoConstraints = false
 
+        titleLabel.identifier = NSUserInterfaceItemIdentifier("selection-title")
         titleLabel.font = .menuFont(ofSize: NSFont.systemFontSize)
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -145,8 +120,8 @@ private final class MenuDetailItemView: NSView {
         NSLayoutConstraint.activate([
             checkmark.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             checkmark.centerYAnchor.constraint(equalTo: centerYAnchor),
-            checkmark.widthAnchor.constraint(equalToConstant: 12),
-            checkmark.heightAnchor.constraint(equalToConstant: 12),
+            checkmark.widthAnchor.constraint(equalToConstant: 14),
+            checkmark.heightAnchor.constraint(equalToConstant: 14),
             selection == nil
                 ? titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12)
                 : titleLabel.leadingAnchor.constraint(equalTo: checkmark.trailingAnchor, constant: 8),
@@ -254,16 +229,57 @@ private final class MenuDetailItemView: NSView {
         ])
     }
 
+    private func selectionImage(selected: Bool) -> NSImage? {
+        let image = NSImage(systemSymbolName: selected ? "largecircle.fill.circle" : "circle",
+                            accessibilityDescription: nil)
+        image?.size = NSSize(width: 14, height: 14)
+        return image
+    }
+
+    func updateSelection(title: String, subtitle: String?, selected: Bool, enabled: Bool) {
+        selectionEnabled = enabled
+        isSelected = selected
+        checkmark.image = selectionImage(selected: selected)
+        checkmark.isHidden = false
+        let text = NSMutableAttributedString(string: title, attributes: [
+            .font: NSFont.menuFont(ofSize: NSFont.systemFontSize),
+        ])
+        if let subtitle {
+            text.append(NSAttributedString(string: "\n" + subtitle, attributes: [
+                .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+                .foregroundColor: enabled ? NSColor.secondaryLabelColor : .disabledControlTextColor,
+            ]))
+        }
+        titleLabel.maximumNumberOfLines = 2
+        titleLabel.attributedStringValue = text
+        frame.size = NSSize(width: max(frame.width, ceil(text.size().width) + 60),
+                            height: subtitle == nil ? 28 : 44)
+        updateAppearance()
+    }
+
+    func addProjectAction(target: AnyObject, action: Selector, index: Int) {
+        let button = NSButton(title: "", target: target, action: action)
+        button.identifier = NSUserInterfaceItemIdentifier("project-selection-button")
+        button.tag = index
+        button.frame = bounds
+        button.autoresizingMask = [.width, .height]
+        button.isBordered = false
+        button.isTransparent = true
+        button.setAccessibilityLabel(titleLabel.stringValue)
+        addSubview(button)
+    }
+
     private func updateAppearance() {
         let primaryColor: NSColor = isMenuHighlighted
             ? .selectedMenuItemTextColor
-            : .labelColor
+            : (selectionEnabled ? .labelColor : .disabledControlTextColor)
         let secondaryColor: NSColor = isMenuHighlighted
             ? .selectedMenuItemTextColor
-            : .secondaryLabelColor
+            : (selectionEnabled ? .secondaryLabelColor : .disabledControlTextColor)
         titleLabel.textColor = primaryColor
         detailLabel.textColor = secondaryColor
-        checkmark.contentTintColor = primaryColor
+        checkmark.contentTintColor = selectionEnabled && isSelected && !isMenuHighlighted
+            ? .systemBlue : primaryColor
         chevron.contentTintColor = secondaryColor
     }
 }
@@ -511,6 +527,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                     makeConfigurationItem(
                         configuration,
                         projectURL: project.url,
+                        isRefreshing: refreshingProjectURLs.contains(project.activeContainerURL),
                         isSelectedForPlay: configuration.scheme
                             == project.selectedLaunchConfigurationScheme
                     )
@@ -519,9 +536,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         }
         if let projectURL = projectCatalog?.selectedProject?.activeContainerURL {
             let message: String?
-            if refreshingProjectURLs.contains(projectURL) {
-                message = "Refreshing destinations…"
-            } else if let failedSchemes = destinationRefreshErrors[projectURL], !failedSchemes.isEmpty {
+            if let failedSchemes = destinationRefreshErrors[projectURL], !failedSchemes.isEmpty {
                 message = "Could not refresh \(failedSchemes.sorted().joined(separator: ", ")). Reopen menu to retry."
             } else {
                 message = nil
@@ -550,6 +565,10 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                 item.tag = index
                 item.state = project == projectCatalog?.selectedProject ? .on : .off
                 item.isEnabled = true
+                let row = MenuDetailItemView(title: project.name, detail: "",
+                    selection: item.state == .on, showsChevron: false)
+                row.addProjectAction(target: self, action: #selector(selectProjectButton(_:)), index: index)
+                item.view = row
                 menu.addItem(item)
             }
         } else {
@@ -707,10 +726,13 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private func makeConfigurationItem(
         _ configuration: LaunchConfiguration,
         projectURL: URL,
+        isRefreshing: Bool,
         isSelectedForPlay: Bool
     ) -> NSMenuItem {
         let destinationTitle: String
-        if let destination = configuration.selectedDestination {
+        if isRefreshing {
+            destinationTitle = "Refreshing…"
+        } else if let destination = configuration.selectedDestination {
             destinationTitle = configuration.isSelectedDestinationAvailable
                 ? destination.displayName
                 : "Unavailable: \(destination.displayName)"
@@ -1438,7 +1460,16 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     @objc
     private func selectProject(_ item: NSMenuItem) {
-        projectCatalog?.selectProject(at: item.tag)
+        selectProject(at: item.tag)
+    }
+
+    @objc private func selectProjectButton(_ button: NSButton) {
+        contextMenu.cancelTracking()
+        selectProject(at: button.tag)
+    }
+
+    private func selectProject(at index: Int) {
+        projectCatalog?.selectProject(at: index)
         onCatalogChange?()
         contextMenu = makeContextMenu()
         refreshConfiguration()
@@ -1668,8 +1699,8 @@ private extension StatusBarController {
         item.identifier = NSUserInterfaceItemIdentifier("working-copy")
         item.representedObject = copy.id
         item.target = self
-        let row = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: item.subtitle == nil ? 28 : 44))
-        row.autoresizingMask = [.width]
+        let row = MenuDetailItemView(title: copy.displayName, detail: "",
+            selection: false, showsChevron: false)
         let button = BranchSelectionButton(copy: copy, target: self, action: #selector(selectWorkingCopyButton(_:)))
         row.addSubview(button)
         item.view = row

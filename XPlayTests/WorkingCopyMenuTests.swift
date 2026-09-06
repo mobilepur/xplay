@@ -24,17 +24,30 @@ final class WorkingCopyMenuTests: XCTestCase {
         let schemeLabel = try XCTUnwrap(schemeRow.subviews.compactMap { $0 as? NSTextField }.first {
             $0.stringValue == "Example"
         })
-        let schemeCheckmark = try XCTUnwrap(schemeRow.subviews.first {
+        let schemeCheckmark = try XCTUnwrap(schemeRow.subviews.compactMap { $0 as? NSImageView }.first {
             $0.identifier?.rawValue == "configuration-checkmark"
         })
-        for item in rows {
+        XCTAssertEqual(schemeCheckmark.contentTintColor, .systemBlue)
+        let projectItem = try XCTUnwrap(controller.contextMenu.items.first { $0.title == fixture.catalog.selectedProject?.name && $0.action != nil })
+        for item in rows + [projectItem] {
             let row = try XCTUnwrap(item.view)
             let button = try XCTUnwrap(row.subviews.compactMap { $0 as? NSButton }.first)
+            let label = try XCTUnwrap(row.subviews.compactMap { $0 as? NSTextField }.first {
+                $0.identifier?.rawValue == "selection-title"
+            })
+            let checkbox = try XCTUnwrap(row.subviews.compactMap { $0 as? NSImageView }.first {
+                $0.identifier?.rawValue == "configuration-checkmark"
+            })
+            XCTAssertFalse(checkbox.isHidden, "Unselected rows keep an empty circle in the same column")
+            if item.state == .on {
+                XCTAssertEqual(checkbox.contentTintColor, .systemBlue)
+            }
             for width in [row.frame.width, CGFloat(600)] {
                 row.frame.size.width = width
-                let cell = try XCTUnwrap(button.cell as? NSButtonCell)
-                XCTAssertEqual(cell.titleRect(forBounds: button.bounds).minX, schemeLabel.frame.minX + schemeLabel.cell!.titleRect(forBounds: schemeLabel.bounds).minX, accuracy: 0.5)
-                XCTAssertEqual(cell.imageRect(forBounds: button.bounds).minX, schemeCheckmark.frame.minX, accuracy: 0.5)
+                row.layoutSubtreeIfNeeded()
+                XCTAssertEqual(label.frame.minX, schemeLabel.frame.minX, accuracy: 0.5)
+                XCTAssertEqual(checkbox.frame.minX, schemeCheckmark.frame.minX, accuracy: 0.5)
+                XCTAssertEqual(checkbox.frame.size, schemeCheckmark.frame.size)
                 XCTAssertTrue(row.hitTest(NSPoint(x: width - 1, y: row.bounds.midY)) === button,
                               "The entire row remains selectable, including its right edge")
             }
