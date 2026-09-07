@@ -96,44 +96,39 @@ final class MenuTintedSwitch: NSControl {
 }
 
 @MainActor
-final class MenuRunButtonCell: NSButtonCell {
+final class MenuActionButtonCell: NSButtonCell {
+    var isPrimary = false
+
     override var interiorBackgroundStyle: NSView.BackgroundStyle {
-        isEnabled ? .emphasized : super.interiorBackgroundStyle
+        isEnabled && isPrimary ? .emphasized : super.interiorBackgroundStyle
     }
 
     override func drawBezel(withFrame frame: NSRect, in controlView: NSView) {
-        guard isEnabled else {
-            super.drawBezel(withFrame: frame, in: controlView)
-            return
-        }
         let bezel = bezelRect(forFrame: frame)
         let radius = bezelCornerRadius(for: bezel)
-        let color = isHighlighted ? NSColor.systemBlue.blended(withFraction: 0.18, of: .black)! : .systemBlue
-        color.setFill()
+        let isDark = controlView.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let neutralColor = NSColor(calibratedWhite: isDark ? 0.33 : 0.95, alpha: 1)
+        let baseColor: NSColor = isEnabled && isPrimary ? .systemBlue : neutralColor
+        let color = isHighlighted ? baseColor.blended(withFraction: 0.18, of: .black)! : baseColor
+        (isEnabled ? color : color.withAlphaComponent(0.5)).setFill()
         NSBezierPath(roundedRect: bezel, xRadius: radius, yRadius: radius).fill()
     }
 
     func bezelRect(forFrame frame: NSRect) -> NSRect {
-        let contentRect = drawingRect(forBounds: frame)
-        return NSRect(
-            x: frame.minX + 6,
-            y: contentRect.minY,
-            width: max(0, frame.width - 12),
-            height: contentRect.height
-        )
+        frame.insetBy(dx: 0, dy: 5)
     }
 
     func bezelCornerRadius(for _: NSRect) -> CGFloat { 6 }
 
     override func drawTitle(_ title: NSAttributedString, withFrame frame: NSRect, in controlView: NSView) -> NSRect {
-        guard isEnabled else { return super.drawTitle(title, withFrame: frame, in: controlView) }
+        guard isEnabled && isPrimary else { return super.drawTitle(title, withFrame: frame, in: controlView) }
         let text = NSMutableAttributedString(attributedString: title)
         text.addAttribute(.foregroundColor, value: NSColor.white, range: NSRange(location: 0, length: text.length))
         return super.drawTitle(text, withFrame: frame, in: controlView)
     }
 
     override func drawImage(_ image: NSImage, withFrame frame: NSRect, in controlView: NSView) {
-        guard isEnabled, image.isTemplate else {
+        guard isEnabled, isPrimary, image.isTemplate else {
             super.drawImage(image, withFrame: frame, in: controlView)
             return
         }
@@ -207,9 +202,17 @@ private final class ExternalLinkButton: NSButton {
 }
 
 @MainActor
-private final class CompactStopButton: NSButton {
+private class MenuActionButton: NSButton {
+    // The custom bezel owns its margins; native button insets vary by macOS version.
+    override var alignmentRectInsets: NSEdgeInsets {
+        NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+    }
+}
+
+@MainActor
+private final class CompactActionButton: MenuActionButton {
     override var intrinsicContentSize: NSSize {
-        NSSize(width: 44, height: super.intrinsicContentSize.height)
+        NSSize(width: 32, height: super.intrinsicContentSize.height)
     }
 }
 
@@ -1035,8 +1038,10 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         item.target = self
         let row = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 54))
         row.autoresizingMask = [.width]
-        let playButton = NSButton(title: "Run", target: self, action: #selector(playFromMenu))
-        playButton.cell = MenuRunButtonCell(textCell: "Run")
+        let playButton = MenuActionButton(title: "Run", target: self, action: #selector(playFromMenu))
+        let playCell = MenuActionButtonCell(textCell: "Run")
+        playCell.isPrimary = true
+        playButton.cell = playCell
         playButton.target = self
         playButton.action = #selector(playFromMenu)
         playButton.identifier = NSUserInterfaceItemIdentifier("run-project-button")
@@ -1065,19 +1070,32 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         spinner.translatesAutoresizingMaskIntoConstraints = false
         playButton.addSubview(spinner)
 
-        let openButton = NSButton(title: "Open", target: self, action: #selector(openFromMenu))
+        let openButton = CompactActionButton(title: "", target: self, action: #selector(openFromMenu))
+        openButton.cell = MenuActionButtonCell(textCell: "")
+        openButton.target = self
+        openButton.action = #selector(openFromMenu)
         openButton.identifier = NSUserInterfaceItemIdentifier("open-project-button")
         openButton.bezelStyle = .rounded
         openButton.controlSize = .large
-        openButton.font = .systemFont(ofSize: 16, weight: .medium)
+        openButton.image = NSImage(
+            systemSymbolName: "arrow.up.right.square",
+            accessibilityDescription: "Open in Xcode"
+        )
+        openButton.imagePosition = .imageOnly
+        openButton.setAccessibilityLabel("Open in Xcode")
+        openButton.setContentHuggingPriority(.required, for: .horizontal)
+        openButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         openButton.toolTip = "Open the selected working copy in Xcode"
         openButton.translatesAutoresizingMaskIntoConstraints = false
 
-        let stopButton = CompactStopButton(
+        let stopButton = CompactActionButton(
             title: "",
             target: self,
             action: #selector(stopFromMenu)
         )
+        stopButton.cell = MenuActionButtonCell(textCell: "")
+        stopButton.target = self
+        stopButton.action = #selector(stopFromMenu)
         stopButton.identifier = NSUserInterfaceItemIdentifier("stop-project-button")
         stopButton.bezelStyle = .rounded
         stopButton.controlSize = .large
@@ -1092,20 +1110,20 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         stopButton.translatesAutoresizingMaskIntoConstraints = false
 
         row.addSubview(playButton)
-        row.addSubview(openButton)
         row.addSubview(stopButton)
+        row.addSubview(openButton)
         NSLayoutConstraint.activate([
-            playButton.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 12),
-            playButton.trailingAnchor.constraint(equalTo: openButton.leadingAnchor, constant: -8),
+            playButton.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 18),
+            playButton.trailingAnchor.constraint(equalTo: stopButton.leadingAnchor, constant: -6),
             playButton.centerYAnchor.constraint(equalTo: row.centerYAnchor),
             playButton.heightAnchor.constraint(equalToConstant: 38),
-            openButton.trailingAnchor.constraint(equalTo: stopButton.leadingAnchor, constant: -8),
+            openButton.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -18),
             openButton.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            openButton.widthAnchor.constraint(equalTo: playButton.widthAnchor),
+            openButton.widthAnchor.constraint(equalToConstant: 32),
             openButton.heightAnchor.constraint(equalToConstant: 38),
-            stopButton.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
+            stopButton.trailingAnchor.constraint(equalTo: openButton.leadingAnchor, constant: -6),
             stopButton.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            stopButton.widthAnchor.constraint(equalToConstant: 44),
+            stopButton.widthAnchor.constraint(equalToConstant: 32),
             stopButton.heightAnchor.constraint(equalToConstant: 38),
             spinner.trailingAnchor.constraint(equalTo: playButton.trailingAnchor, constant: -14),
             spinner.centerYAnchor.constraint(equalTo: playButton.centerYAnchor),
