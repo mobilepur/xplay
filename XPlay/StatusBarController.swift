@@ -661,6 +661,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     private(set) var statusItem: NSStatusItem
     private let statusItemView: StatusItemView
+    private var statusItemViewConstraints: [NSLayoutConstraint] = []
     private let projectCatalog: ProjectCatalog?
     private var observedSelectedProjectURL: URL?
     private let schemeResolver: XcodeSchemeResolver
@@ -1494,13 +1495,6 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         button.action = #selector(handleStatusItemClick)
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
 
-        button.addSubview(statusItemView)
-
-        NSLayoutConstraint.activate([
-            statusItemView.centerXAnchor.constraint(equalTo: button.centerXAnchor),
-            statusItemView.centerYAnchor.constraint(equalTo: button.centerYAnchor),
-        ])
-
         refreshConfiguration()
     }
 
@@ -1852,6 +1846,22 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         }
     }
 
+    private func installStatusItemView(in button: NSButton) {
+        guard statusItemView.superview !== button else { return }
+        button.addSubview(statusItemView)
+        statusItemViewConstraints = [
+            statusItemView.centerXAnchor.constraint(equalTo: button.centerXAnchor),
+            statusItemView.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+        ]
+        NSLayoutConstraint.activate(statusItemViewConstraints)
+    }
+
+    private func removeStatusItemView() {
+        NSLayoutConstraint.deactivate(statusItemViewConstraints)
+        statusItemViewConstraints.removeAll()
+        statusItemView.removeFromSuperview()
+    }
+
     func refreshConfiguration() {
         guard let button = statusItem.button else { return }
         let project = projectCatalog?.selectedProject
@@ -1873,16 +1883,26 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         } else {
             description = "No project scheme selected"
         }
-        button.image = nil
-        statusItemView.iconImageView.image = menuBarImage(description: "XPlay")
-        statusItemView.configure(
-            content: appSettings.menuBarContent,
-            projectName: activeLaunchPlan?.productName ?? project?.name,
-            destination: destination
-        )
-        statusItem.length = statusItemView.showsOnlyLogo
-            ? NSStatusItem.squareLength
-            : max(NSStatusBar.system.thickness, statusItemView.fittingSize.width + 8)
+        let usesNativeImage = appSettings.menuBarContent == .xplay && !isRunning
+        if usesNativeImage {
+            removeStatusItemView()
+            button.image = menuBarImage(description: "XPlay")
+            button.imagePosition = .imageOnly
+            button.imageScaling = .scaleProportionallyDown
+            statusItem.length = NSStatusItem.squareLength
+        } else {
+            button.image = nil
+            installStatusItemView(in: button)
+            statusItemView.iconImageView.image = menuBarImage(description: "XPlay")
+            statusItemView.configure(
+                content: appSettings.menuBarContent,
+                projectName: activeLaunchPlan?.productName ?? project?.name,
+                destination: destination
+            )
+            statusItem.length = statusItemView.showsOnlyLogo
+                ? NSStatusItem.squareLength
+                : max(NSStatusBar.system.thickness, statusItemView.fittingSize.width + 8)
+        }
         let menuHint = appSettings.leftClickAction == .menu ? "Left-click for menu" : "Right-click for menu"
         if appSettings.leftClickAction == .menu {
             button.setAccessibilityLabel("Open XPlay menu")
