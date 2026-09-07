@@ -231,9 +231,11 @@ final class StatusBarControllerTests: XCTestCase {
             XCTAssertEqual(play.title, "Run")
             XCTAssertEqual(play.font, .systemFont(ofSize: 16, weight: .medium))
             XCTAssertEqual(play.bezelColor, .systemBlue)
-            if #available(macOS 26.0, *) {
-                XCTAssertEqual(play.tintProminence, .primary)
-            }
+            #if compiler(>=6.2)
+                if #available(macOS 26.0, *) {
+                    XCTAssertEqual(play.tintProminence, .primary)
+                }
+            #endif
             XCTAssertEqual(play.image?.name(), NSImage.Name("XPlayIcon"))
             XCTAssertEqual(play.image?.size, NSSize(width: 21, height: 18))
             XCTAssertTrue(play.image?.isTemplate == true)

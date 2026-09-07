@@ -1033,9 +1033,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         playButton.controlSize = .large
         playButton.font = .systemFont(ofSize: 16, weight: .medium)
         playButton.bezelColor = .systemBlue
+        #if compiler(>=6.2)
         if #available(macOS 26.0, *) {
             playButton.tintProminence = .primary
         }
+        #endif
         playButton.image = menuBarImage(description: "XPlay")
         playButton.imagePosition = .imageLeading
         playButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
