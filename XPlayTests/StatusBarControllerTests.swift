@@ -5,6 +5,54 @@ import XCTest
 
 final class StatusBarControllerTests: XCTestCase {
     @MainActor
+    func testActionButtonsDrawBezelsAtTheSameHeight() throws {
+        let controller = StatusBarController()
+        let row = try XCTUnwrap(controller.contextMenu.items.first { $0.title == "Run Project" }?.view)
+        row.frame.size.width = 400
+        let window = NSWindow(contentRect: row.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.contentView = row
+        row.layoutSubtreeIfNeeded()
+        let buttons = descendants(of: row).compactMap { $0 as? NSButton }
+        let run = try XCTUnwrap(buttons.first { $0.title == "Run" })
+        let open = try XCTUnwrap(buttons.first { $0.identifier?.rawValue == "open-project-button" })
+        let stop = try XCTUnwrap(buttons.first { $0.identifier?.rawValue == "stop-project-button" })
+
+        func paintedRows(_ button: NSButton) throws -> [Int] {
+            let bitmap = try XCTUnwrap(button.bitmapImageRepForCachingDisplay(in: button.bounds))
+            button.cacheDisplay(in: button.bounds, to: bitmap)
+            return (0..<bitmap.pixelsHigh).filter {
+                (bitmap.colorAt(x: bitmap.pixelsWide / 2, y: $0)?.alphaComponent ?? 0) > 0.01
+            }
+        }
+
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            row.appearance = NSAppearance(named: appearance)
+            for enabled in [true, false] {
+                for button in [run, open, stop] { button.isEnabled = enabled }
+                let runRows = try paintedRows(run)
+                XCTAssertFalse(runRows.isEmpty)
+                for button in [open, stop] {
+                    let rows = try paintedRows(button)
+                    XCTAssertFalse(rows.isEmpty)
+                    XCTAssertEqual(runRows.first, rows.first)
+                    XCTAssertEqual(runRows.last, rows.last)
+                    XCTAssertEqual(button.frame.midY, run.frame.midY, accuracy: 0.5)
+                }
+                let bitmap = try XCTUnwrap(row.bitmapImageRepForCachingDisplay(in: row.bounds))
+                row.cacheDisplay(in: row.bounds, to: bitmap)
+                let image = NSImage(size: row.bounds.size)
+                image.addRepresentation(bitmap)
+                let attachment = XCTAttachment(image: image)
+                attachment.name = "Action buttons \(appearance.rawValue) enabled=\(enabled)"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+            }
+        }
+    }
+
+    @MainActor
     func testRunAndOpenShareAnActionRowBelowTheCurrentBranch() throws {
         let controller = StatusBarController()
         let menu = controller.contextMenu
@@ -15,7 +63,10 @@ final class StatusBarControllerTests: XCTestCase {
         let run = try XCTUnwrap(descendants(of: row).compactMap { $0 as? NSButton }.first {
             $0.identifier?.rawValue == "run-project-button"
         })
-        XCTAssertEqual(open.title, "Open")
+        XCTAssertEqual(open.title, "")
+        XCTAssertEqual(open.imagePosition, .imageOnly)
+        XCTAssertNotNil(open.image)
+        XCTAssertEqual(open.accessibilityLabel(), "Open in Xcode")
         XCTAssertEqual(run.title, "Run")
         let branchIndex = try XCTUnwrap(menu.items.firstIndex {
             $0.identifier?.rawValue == "current-branch"
@@ -24,8 +75,21 @@ final class StatusBarControllerTests: XCTestCase {
         XCTAssertEqual(branchIndex + 1, runIndex)
         row.frame.size.width = 400
         row.layoutSubtreeIfNeeded()
-        XCTAssertLessThan(run.alignmentRect(forFrame: run.frame).maxX,
-                          open.alignmentRect(forFrame: open.frame).minX)
+        let stop = try XCTUnwrap(descendants(of: row).compactMap { $0 as? NSButton }.first {
+            $0.identifier?.rawValue == "stop-project-button"
+        })
+        func visibleRect(_ button: NSButton) throws -> NSRect {
+            let cell = try XCTUnwrap(button.cell as? MenuActionButtonCell)
+            return button.convert(cell.bezelRect(forFrame: button.bounds), to: row)
+        }
+        let runRect = try visibleRect(run)
+        let stopRect = try visibleRect(stop)
+        let openRect = try visibleRect(open)
+        XCTAssertEqual(stopRect.minX - runRect.maxX, 6, accuracy: 0.5)
+        XCTAssertEqual(openRect.minX - stopRect.maxX, 6, accuracy: 0.5)
+        XCTAssertEqual(openRect.width, 32, accuracy: 0.5)
+        XCTAssertEqual(stopRect.width, openRect.width, accuracy: 0.5)
+        XCTAssertEqual(row.bounds.maxX - openRect.maxX, 18, accuracy: 0.5)
     }
 
     @MainActor
@@ -256,24 +320,20 @@ final class StatusBarControllerTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(row.frame.height, 48)
             let open = try XCTUnwrap(buttons.first { $0.identifier?.rawValue == "open-project-button" })
             let openRect = open.alignmentRect(forFrame: open.frame)
-            XCTAssertEqual(play.frame.width, open.frame.width, accuracy: 0.5)
-            XCTAssertEqual(
-                try XCTUnwrap(play.cell).drawingRect(forBounds: play.bounds).width,
-                try XCTUnwrap(open.cell).drawingRect(forBounds: open.bounds).width,
-                accuracy: 0.5
-            )
-            let playCell = try XCTUnwrap(play.cell as? MenuRunButtonCell)
+            XCTAssertGreaterThan(play.frame.width, open.frame.width)
+            XCTAssertEqual(open.frame.width, stop.frame.width, accuracy: 0.5)
+            let playCell = try XCTUnwrap(play.cell as? MenuActionButtonCell)
             let playBezel = playCell.bezelRect(forFrame: play.bounds)
-            let openBezel = try XCTUnwrap(open.cell).drawingRect(forBounds: open.bounds)
-            XCTAssertEqual(playBezel.minX, play.bounds.minX + 6, accuracy: 0.5)
-            XCTAssertEqual(playBezel.maxX, play.bounds.maxX - 6, accuracy: 0.5)
+            let openBezel = try XCTUnwrap(open.cell as? MenuActionButtonCell).bezelRect(forFrame: open.bounds)
+            XCTAssertEqual(playBezel.minX, play.bounds.minX, accuracy: 0.5)
+            XCTAssertEqual(playBezel.maxX, play.bounds.maxX, accuracy: 0.5)
             XCTAssertEqual(playBezel.minY, openBezel.minY, accuracy: 0.5)
             XCTAssertEqual(playBezel.height, openBezel.height, accuracy: 0.5)
             XCTAssertEqual(playCell.bezelCornerRadius(for: playBezel), 6, accuracy: 0.5)
-            XCTAssertEqual(openRect.minX - playAlignmentRect.maxX, 8, accuracy: 0.5)
-            XCTAssertEqual(stopAlignmentRect.minX - openRect.maxX, 8, accuracy: 0.5)
+            XCTAssertEqual(stopAlignmentRect.minX - playAlignmentRect.maxX, 6, accuracy: 0.5)
+            XCTAssertEqual(openRect.minX - stopAlignmentRect.maxX, 6, accuracy: 0.5)
             XCTAssertGreaterThanOrEqual(playAlignmentRect.width, play.intrinsicContentSize.width)
-            XCTAssertEqual(stopAlignmentRect.width, 44, accuracy: 0.5)
+            XCTAssertEqual(stopAlignmentRect.width, 32, accuracy: 0.5)
             XCTAssertEqual(play.title, "Run")
             XCTAssertEqual(play.font, .systemFont(ofSize: 16, weight: .medium))
             XCTAssertEqual(play.bezelColor, .systemBlue)
@@ -288,7 +348,7 @@ final class StatusBarControllerTests: XCTestCase {
             XCTAssertEqual(stop.title, "")
             XCTAssertEqual(stop.imagePosition, .imageOnly)
             XCTAssertEqual(stop.accessibilityLabel(), "Stop")
-            XCTAssertEqual(stop.intrinsicContentSize.width, 44, accuracy: 0.5)
+            XCTAssertEqual(stop.intrinsicContentSize.width, 32, accuracy: 0.5)
             XCTAssertLessThan(
                 stop.contentCompressionResistancePriority(for: .horizontal),
                 .required

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 1.1.4 — 2026-09-07
+
+### Changed
+
+- Place a compact Open in Xcode icon at the right of the action row, beside Stop.
+- Reduce the spacing between action buttons and give Run the remaining width.
+
+### Fixed
+
+- Keep Run, Stop, and Open at the same visible height in light and dark mode,
+  including disabled states.
+
 ## 1.1.3 — 2026-09-07
 
 ### Fixed
