@@ -202,7 +202,15 @@ private final class ExternalLinkButton: NSButton {
 }
 
 @MainActor
-private final class CompactActionButton: NSButton {
+private class MenuActionButton: NSButton {
+    // The custom bezel owns its margins; native button insets vary by macOS version.
+    override var alignmentRectInsets: NSEdgeInsets {
+        NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+    }
+}
+
+@MainActor
+private final class CompactActionButton: MenuActionButton {
     override var intrinsicContentSize: NSSize {
         NSSize(width: 32, height: super.intrinsicContentSize.height)
     }
@@ -1030,7 +1038,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         item.target = self
         let row = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 54))
         row.autoresizingMask = [.width]
-        let playButton = NSButton(title: "Run", target: self, action: #selector(playFromMenu))
+        let playButton = MenuActionButton(title: "Run", target: self, action: #selector(playFromMenu))
         let playCell = MenuActionButtonCell(textCell: "Run")
         playCell.isPrimary = true
         playButton.cell = playCell
