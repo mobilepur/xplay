@@ -4,10 +4,11 @@ import XCTest
 
 @MainActor
 final class WorkingCopyMenuTests: XCTestCase {
-    func testBranchRowsShowOnlyNameWithNativeWorktreeSubtitle() async throws {
+    func testBranchRowsShowNameWorktreeSubtitleAndRecentActivity() async throws {
         let fixture = try Fixture()
         defer { fixture.remove() }
-        let newCopy = GitWorkingCopy(id: "new", branchName: "feature/new", head: "abc1234",
+        let freshBranchName = "feature/a-very-long-branch-name-that-needs-truncation"
+        let newCopy = GitWorkingCopy(id: "new", branchName: freshBranchName, head: "abc1234",
             rootURL: nil, containerURL: nil, lastActivity: .now, isDirty: false, isMainWorktree: false)
         let controller = StatusBarController(projectCatalog: fixture.catalog,
             appSettings: AppSettings(defaults: fixture.defaults),
@@ -15,8 +16,32 @@ final class WorkingCopyMenuTests: XCTestCase {
                 rootURL: fixture.directory, workingCopies: [fixture.copies[4], fixture.copies[0], newCopy])))
         await controller.refreshWorkingCopies()
         let rows = controller.contextMenu.items.filter { $0.identifier?.rawValue == "working-copy" }
-        XCTAssertEqual(rows.map(\.title), ["main", "feature-0", "feature/new"])
+        XCTAssertEqual(rows.map(\.title), ["main", "feature-0", freshBranchName])
         XCTAssertEqual(rows.map(\.subtitle), [nil, "Worktree", "New Worktree"])
+        let activityLabels = try rows.map { item in
+            try XCTUnwrap(item.view?.subviews.compactMap { $0 as? NSTextField }.first {
+                $0.identifier?.rawValue == "selection-detail"
+            })
+        }
+        XCTAssertTrue(activityLabels.allSatisfy { !$0.stringValue.isEmpty })
+        XCTAssertEqual(activityLabels[2].stringValue, "Just now")
+        for (item, activityLabel) in zip(rows, activityLabels) {
+            let row = try XCTUnwrap(item.view)
+            for width in [row.frame.width, CGFloat(600)] {
+                row.frame.size.width = width
+                row.layoutSubtreeIfNeeded()
+                XCTAssertEqual(activityLabel.alignment, .right)
+                XCTAssertEqual(
+                    activityLabel.alignmentRect(forFrame: activityLabel.frame).maxX,
+                    row.bounds.maxX - 12,
+                    accuracy: 0.5
+                )
+                XCTAssertGreaterThanOrEqual(
+                    activityLabel.frame.width,
+                    activityLabel.intrinsicContentSize.width - 0.5
+                )
+            }
+        }
         let schemeRow = try XCTUnwrap(controller.contextMenu.items.compactMap(\.view).first {
             $0.subviews.contains { $0.identifier?.rawValue == "scheme-selection-button" }
         })

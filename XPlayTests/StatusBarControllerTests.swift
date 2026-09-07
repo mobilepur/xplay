@@ -174,13 +174,17 @@ final class StatusBarControllerTests: XCTestCase {
             await fulfillment(of: [started], timeout: 2)
             let refreshingHeight = menu.size.height
             let refreshingRow = menu.items.first { $0.title == "Example-macOS" }?.view
-            let showsRefresh = refreshingRow.map {
-                descendants(of: $0).compactMap { $0 as? NSTextField }
-                    .contains { $0.stringValue == "Refreshing…" }
-            } ?? false
+            let refreshingViews = refreshingRow.map(descendants(of:)) ?? []
+            let showsRefreshText = refreshingViews.compactMap { $0 as? NSTextField }
+                .contains { $0.stringValue == "Refreshing…" }
+            let destinationSpinner = refreshingViews.compactMap { $0 as? NSProgressIndicator }
+                .first { $0.identifier?.rawValue == "destination-refresh-spinner" }
             resume.signal()
             await refresh.value
-            XCTAssertTrue(showsRefresh)
+            XCTAssertFalse(showsRefreshText)
+            XCTAssertNotNil(destinationSpinner)
+            XCTAssertFalse(destinationSpinner?.isHidden ?? true)
+            XCTAssertTrue(destinationSpinner?.isIndeterminate ?? false)
             XCTAssertEqual(refreshingHeight, idleHeight)
             XCTAssertEqual(menu.size.height, idleHeight)
             controller.perform(.startProject)
@@ -596,7 +600,7 @@ final class StatusBarControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testConfigurationRowsKeepChangeButtonSeparateFromSchemeAndDestination() throws {
+    func testConfigurationRowsKeepChevronButtonSeparateFromSchemeAndDestination() throws {
         try withState { catalog, settings in
             let simulator = XcodeDestination(
                 platform: .iOSSimulator,
@@ -652,7 +656,10 @@ final class StatusBarControllerTests: XCTestCase {
                 NSPoint(x: schemeLabel.frame.midX, y: schemeLabel.frame.midY)
             ))
             XCTAssertGreaterThanOrEqual(destinationRect.minX, destinationLabel.frame.maxX + 4)
-            XCTAssertEqual(destinationButton.title, "Change…")
+            XCTAssertEqual(destinationButton.title, "")
+            XCTAssertNotNil(destinationButton.image)
+            XCTAssertEqual(destinationButton.imagePosition, .imageOnly)
+            XCTAssertLessThanOrEqual(destinationRect.width, 30)
             XCTAssertNil(item.submenu)
             XCTAssertEqual(
                 item.accessibilityLabel(),
@@ -799,7 +806,9 @@ final class StatusBarControllerTests: XCTestCase {
             let button = try XCTUnwrap(descendants(of: row).compactMap { $0 as? NSButton }.first {
                 $0.identifier?.rawValue == "destination-menu-button"
             })
-            XCTAssertEqual(button.title, "Change…")
+            XCTAssertEqual(button.title, "")
+            XCTAssertNotNil(button.image)
+            XCTAssertEqual(button.imagePosition, .imageOnly)
             XCTAssertNil(item.submenu)
             button.performClick(nil)
             let submenu = try XCTUnwrap(item.submenu)
