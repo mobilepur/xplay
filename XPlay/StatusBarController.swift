@@ -1,24 +1,145 @@
 import AppKit
+import SwiftUI
+
+@MainActor
+private final class MenuSwitchState: ObservableObject {
+    @Published var isOn = false
+    @Published var isEnabled = true
+}
+
+private struct MenuSwitchContent: View {
+    @ObservedObject var model: MenuSwitchState
+    let title: String
+    let setOn: (Bool) -> Void
+
+    var body: some View {
+        Toggle(title, isOn: Binding(get: { model.isOn }, set: setOn))
+            .labelsHidden()
+            .toggleStyle(MenuSwitchStyle())
+            .disabled(!model.isEnabled)
+            .fixedSize()
+    }
+}
+
+private struct MenuSwitchStyle: ToggleStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.12)) {
+                configuration.isOn.toggle()
+            }
+        } label: {
+            Capsule()
+                .fill(configuration.isOn ? Color(nsColor: .systemBlue) : Color.primary.opacity(0.15))
+                .frame(width: 44, height: 20)
+                .overlay(alignment: configuration.isOn ? .trailing : .leading) {
+                    Capsule().fill(.white)
+                        .frame(width: 26, height: 16)
+                        .padding(.horizontal, 2)
+                }
+                .opacity(isEnabled ? 1 : 0.45)
+        }
+        .buttonStyle(.plain)
+        .highPriorityGesture(DragGesture(minimumDistance: 4).onEnded { value in
+            guard isEnabled else { return }
+            withAnimation(.easeInOut(duration: 0.12)) {
+                configuration.isOn = value.location.x >= 22
+            }
+        })
+        .accessibilityRepresentation {
+            Toggle(isOn: configuration.$isOn) { configuration.label }
+                .toggleStyle(.switch)
+        }
+    }
+}
+
+@MainActor
+final class MenuTintedSwitch: NSControl {
+    private let model = MenuSwitchState()
+    private var hostingView: NSHostingView<MenuSwitchContent>!
+
+    var state: NSControl.StateValue {
+        get { model.isOn ? .on : .off }
+        set { model.isOn = newValue == .on }
+    }
+
+    override var isEnabled: Bool {
+        didSet { model.isEnabled = isEnabled }
+    }
+
+    init(title: String) {
+        super.init(frame: .zero)
+        // NSSwitch has no public tint API. Use an accessible SwiftUI toggle
+        // with explicit colors that remain visible in a non-key menu window.
+        hostingView = NSHostingView(rootView: MenuSwitchContent(model: model, title: title) { [weak self] isOn in
+            guard let self, self.isEnabled else { return }
+            self.state = isOn ? .on : .off
+            self.sendAction(self.action, to: self.target)
+        })
+        hostingView.frame = bounds
+        hostingView.autoresizingMask = [.width, .height]
+        addSubview(hostingView)
+        setAccessibilityElement(false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override var intrinsicContentSize: NSSize { hostingView.fittingSize }
+
+    override func performClick(_ sender: Any?) {
+        guard isEnabled else { return }
+        state = state == .on ? .off : .on
+        sendAction(action, to: target)
+    }
+}
+
+@MainActor
+private final class MenuRunButtonCell: NSButtonCell {
+    override var interiorBackgroundStyle: NSView.BackgroundStyle {
+        isEnabled ? .emphasized : super.interiorBackgroundStyle
+    }
+
+    override func drawBezel(withFrame frame: NSRect, in controlView: NSView) {
+        guard isEnabled else {
+            super.drawBezel(withFrame: frame, in: controlView)
+            return
+        }
+        let content = drawingRect(forBounds: frame)
+        let bezel = NSRect(x: frame.minX, y: content.minY, width: frame.width, height: content.height)
+        let radius: CGFloat
+        if #available(macOS 26.0, *) { radius = bezel.height / 2 } else { radius = 6 }
+        let color = isHighlighted ? NSColor.systemBlue.blended(withFraction: 0.18, of: .black)! : .systemBlue
+        color.setFill()
+        NSBezierPath(roundedRect: bezel, xRadius: radius, yRadius: radius).fill()
+    }
+
+    override func drawTitle(_ title: NSAttributedString, withFrame frame: NSRect, in controlView: NSView) -> NSRect {
+        guard isEnabled else { return super.drawTitle(title, withFrame: frame, in: controlView) }
+        let text = NSMutableAttributedString(attributedString: title)
+        text.addAttribute(.foregroundColor, value: NSColor.white, range: NSRange(location: 0, length: text.length))
+        return super.drawTitle(text, withFrame: frame, in: controlView)
+    }
+
+    override func drawImage(_ image: NSImage, withFrame frame: NSRect, in controlView: NSView) {
+        guard isEnabled, image.isTemplate else {
+            super.drawImage(image, withFrame: frame, in: controlView)
+            return
+        }
+        let tinted = NSImage(size: image.size, flipped: false) { bounds in
+            image.draw(in: bounds)
+            NSColor.white.setFill()
+            bounds.fill(using: .sourceIn)
+            return true
+        }
+        super.drawImage(tinted, withFrame: frame, in: controlView)
+    }
+}
 
 @MainActor
 private final class ConfigurationActionButton: NSButton {
     var representedSelection: [String: String]?
-}
-
-@MainActor
-private final class BranchSelectionCell: NSButtonCell {
-    // Scheme labels have a two-point NSTextField alignment inset.
-    private static let textLeading = 32 - NSTextField(labelWithString: "").alignmentRectInsets.left
-
-    override func titleRect(forBounds bounds: NSRect) -> NSRect {
-        let height = ceil(attributedTitle.size().height)
-        return NSRect(x: bounds.minX + Self.textLeading, y: bounds.midY - height / 2,
-                      width: max(0, bounds.width - Self.textLeading - 12), height: height)
-    }
-
-    override func imageRect(forBounds bounds: NSRect) -> NSRect {
-        NSRect(x: bounds.minX + 12, y: bounds.midY - 6, width: 12, height: 12)
-    }
 }
 
 @MainActor
@@ -28,7 +149,8 @@ private final class BranchSelectionButton: NSButton {
     init(copy: GitWorkingCopy, target: AnyObject, action: Selector) {
         self.copy = copy
         super.init(frame: NSRect(x: 0, y: 0, width: 260, height: 44))
-        cell = BranchSelectionCell(textCell: "")
+        title = ""
+        isTransparent = true
         self.target = target
         self.action = action
         identifier = NSUserInterfaceItemIdentifier("branch-selection-button")
@@ -43,25 +165,28 @@ private final class BranchSelectionButton: NSButton {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func update(copy: GitWorkingCopy, subtitle: String?, selected: Bool, enabled: Bool) {
+    func update(
+        copy: GitWorkingCopy,
+        subtitle: String?,
+        activityTitle: String,
+        selected: Bool,
+        enabled: Bool
+    ) {
         self.copy = copy
         isEnabled = enabled
-        let color = enabled ? NSColor.labelColor : .disabledControlTextColor
-        let text = NSMutableAttributedString(string: copy.displayName, attributes: [
-            .font: NSFont.menuFont(ofSize: NSFont.systemFontSize), .foregroundColor: color,
-        ])
-        if let subtitle {
-            text.append(NSAttributedString(string: "\n" + subtitle, attributes: [
-                .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
-                .foregroundColor: enabled ? NSColor.secondaryLabelColor : .disabledControlTextColor,
-            ]))
+        if let row = superview as? MenuDetailItemView {
+            row.updateSelection(
+                title: copy.displayName,
+                subtitle: subtitle,
+                detail: activityTitle,
+                selected: selected,
+                enabled: enabled
+            )
+            frame = row.bounds
         }
-        attributedTitle = text
-        image = selected ? NSImage(systemSymbolName: "checkmark", accessibilityDescription: nil)
-            : NSImage(size: NSSize(width: 12, height: 12))
-        image?.size = NSSize(width: 12, height: 12)
-        frame.size = NSSize(width: max(frame.width, ceil(text.size().width) + 48), height: subtitle == nil ? 28 : 44)
-        setAccessibilityLabel([copy.displayName, subtitle].compactMap { $0 }.joined(separator: ", "))
+        setAccessibilityLabel(
+            [copy.displayName, subtitle, activityTitle].compactMap { $0 }.joined(separator: ", ")
+        )
         setAccessibilityValue(selected ? 1 : 0)
     }
 }
@@ -84,7 +209,10 @@ private final class MenuDetailItemView: NSView {
     private let detailLabel: NSTextField
     private let checkmark: NSImageView
     private let chevron: NSImageView
+    private let progressIndicator: NSProgressIndicator?
     private var isMenuHighlighted = false
+    private var selectionEnabled = true
+    private var isSelected = false
 
     init(
         title: String,
@@ -92,34 +220,37 @@ private final class MenuDetailItemView: NSView {
         selection: Bool? = nil,
         chevronIdentifier: String? = nil,
         showsChevron: Bool = true,
-        trailingAccessoryWidth: CGFloat = 0
+        trailingAccessoryWidth: CGFloat = 0,
+        showsProgressIndicator: Bool = false
     ) {
         titleLabel = NSTextField(labelWithString: title)
         detailLabel = NSTextField(labelWithString: detail)
         checkmark = NSImageView()
         chevron = NSImageView()
+        progressIndicator = showsProgressIndicator ? NSProgressIndicator() : nil
 
         super.init(frame: NSRect(x: 0, y: 0, width: 320 + trailingAccessoryWidth, height: 28))
 
+        isSelected = selection == true
         autoresizingMask = [.width]
 
         checkmark.identifier = NSUserInterfaceItemIdentifier("configuration-checkmark")
-        checkmark.image = NSImage(
-            systemSymbolName: "checkmark",
-            accessibilityDescription: nil
-        )
-        checkmark.isHidden = selection != true
+        checkmark.image = selectionImage(selected: selection == true)
+        checkmark.isHidden = selection == nil
         checkmark.translatesAutoresizingMaskIntoConstraints = false
 
+        titleLabel.identifier = NSUserInterfaceItemIdentifier("selection-title")
         titleLabel.font = .menuFont(ofSize: NSFont.systemFontSize)
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
 
         detailLabel.font = .menuFont(ofSize: NSFont.systemFontSize)
+        detailLabel.identifier = NSUserInterfaceItemIdentifier("selection-detail")
         detailLabel.alignment = .right
         detailLabel.lineBreakMode = .byTruncatingMiddle
         detailLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         detailLabel.translatesAutoresizingMaskIntoConstraints = false
+        detailLabel.isHidden = showsProgressIndicator
         if selection == nil {
             // Round up so pixel alignment cannot truncate short setting values.
             detailLabel.widthAnchor.constraint(
@@ -142,11 +273,31 @@ private final class MenuDetailItemView: NSView {
         addSubview(detailLabel)
         addSubview(chevron)
 
+        if let progressIndicator {
+            progressIndicator.identifier = NSUserInterfaceItemIdentifier(
+                "destination-refresh-spinner"
+            )
+            progressIndicator.style = .spinning
+            progressIndicator.controlSize = .small
+            progressIndicator.isIndeterminate = true
+            progressIndicator.isDisplayedWhenStopped = false
+            progressIndicator.setAccessibilityLabel("Refreshing destinations")
+            progressIndicator.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(progressIndicator)
+            NSLayoutConstraint.activate([
+                progressIndicator.trailingAnchor.constraint(equalTo: detailLabel.trailingAnchor),
+                progressIndicator.centerYAnchor.constraint(equalTo: centerYAnchor),
+                progressIndicator.widthAnchor.constraint(equalToConstant: 14),
+                progressIndicator.heightAnchor.constraint(equalToConstant: 14),
+            ])
+            progressIndicator.startAnimation(nil)
+        }
+
         NSLayoutConstraint.activate([
             checkmark.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             checkmark.centerYAnchor.constraint(equalTo: centerYAnchor),
-            checkmark.widthAnchor.constraint(equalToConstant: 12),
-            checkmark.heightAnchor.constraint(equalToConstant: 12),
+            checkmark.widthAnchor.constraint(equalToConstant: 14),
+            checkmark.heightAnchor.constraint(equalToConstant: 14),
             selection == nil
                 ? titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12)
                 : titleLabel.leadingAnchor.constraint(equalTo: checkmark.trailingAnchor, constant: 8),
@@ -229,10 +380,15 @@ private final class MenuDetailItemView: NSView {
         )
         destinationButton.identifier = NSUserInterfaceItemIdentifier("destination-menu-button")
         destinationButton.menu = destinationMenu
-        destinationButton.title = "Change…"
+        destinationButton.title = ""
+        destinationButton.image = NSImage(
+            systemSymbolName: "chevron.right",
+            accessibilityDescription: nil
+        )
+        destinationButton.imagePosition = .imageOnly
+        destinationButton.imageScaling = .scaleProportionallyDown
         destinationButton.bezelStyle = .rounded
         destinationButton.controlSize = .small
-        destinationButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         destinationButton.focusRingType = .none
         destinationButton.toolTip = "Choose device for \(titleLabel.stringValue)"
         destinationButton.setAccessibilityLabel(
@@ -248,22 +404,70 @@ private final class MenuDetailItemView: NSView {
             schemeButton.topAnchor.constraint(equalTo: topAnchor),
             schemeButton.bottomAnchor.constraint(equalTo: bottomAnchor),
             destinationButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            destinationButton.widthAnchor.constraint(equalToConstant: 70),
+            destinationButton.widthAnchor.constraint(equalToConstant: 28),
             destinationButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             destinationButton.heightAnchor.constraint(equalToConstant: 22),
         ])
     }
 
+    private func selectionImage(selected: Bool) -> NSImage? {
+        let image = NSImage(systemSymbolName: selected ? "largecircle.fill.circle" : "circle",
+                            accessibilityDescription: nil)
+        image?.size = NSSize(width: 14, height: 14)
+        return image
+    }
+
+    func updateSelection(
+        title: String,
+        subtitle: String?,
+        detail: String,
+        selected: Bool,
+        enabled: Bool
+    ) {
+        selectionEnabled = enabled
+        isSelected = selected
+        checkmark.image = selectionImage(selected: selected)
+        checkmark.isHidden = false
+        detailLabel.stringValue = detail
+        let text = NSMutableAttributedString(string: title, attributes: [
+            .font: NSFont.menuFont(ofSize: NSFont.systemFontSize),
+        ])
+        if let subtitle {
+            text.append(NSAttributedString(string: "\n" + subtitle, attributes: [
+                .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+                .foregroundColor: enabled ? NSColor.secondaryLabelColor : .disabledControlTextColor,
+            ]))
+        }
+        titleLabel.maximumNumberOfLines = 2
+        titleLabel.attributedStringValue = text
+        frame.size = NSSize(width: max(frame.width, ceil(text.size().width) + 60),
+                            height: subtitle == nil ? 28 : 44)
+        updateAppearance()
+    }
+
+    func addProjectAction(target: AnyObject, action: Selector, index: Int) {
+        let button = NSButton(title: "", target: target, action: action)
+        button.identifier = NSUserInterfaceItemIdentifier("project-selection-button")
+        button.tag = index
+        button.frame = bounds
+        button.autoresizingMask = [.width, .height]
+        button.isBordered = false
+        button.isTransparent = true
+        button.setAccessibilityLabel(titleLabel.stringValue)
+        addSubview(button)
+    }
+
     private func updateAppearance() {
         let primaryColor: NSColor = isMenuHighlighted
             ? .selectedMenuItemTextColor
-            : .labelColor
+            : (selectionEnabled ? .labelColor : .disabledControlTextColor)
         let secondaryColor: NSColor = isMenuHighlighted
             ? .selectedMenuItemTextColor
-            : .secondaryLabelColor
+            : (selectionEnabled ? .secondaryLabelColor : .disabledControlTextColor)
         titleLabel.textColor = primaryColor
         detailLabel.textColor = secondaryColor
-        checkmark.contentTintColor = primaryColor
+        checkmark.contentTintColor = selectionEnabled && isSelected && !isMenuHighlighted
+            ? .systemBlue : primaryColor
         chevron.contentTintColor = secondaryColor
     }
 }
@@ -454,6 +658,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private(set) var statusItem: NSStatusItem
     private let statusItemView: StatusItemView
     private let projectCatalog: ProjectCatalog?
+    private var observedSelectedProjectURL: URL?
     private let schemeResolver: XcodeSchemeResolver
     private let appSettings: AppSettings
     private let onEditProjects: (() -> Void)?
@@ -483,6 +688,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private weak var destinationMenuParent: NSMenuItem?
     private var deferredMenuRefresh = false
     private var refreshingProjectURLs = Set<URL>()
+    private var manuallyRefreshingProjectURLs = Set<URL>()
     private var destinationRefreshErrors: [URL: Set<String>] = [:]
     private var activeLauncher: (any ProjectLaunching)?
     private var activeLaunchID: UUID?
@@ -500,8 +706,13 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         menu.autoenablesItems = false
         menu.delegate = self
 
+        let selectedProject = projectCatalog?.selectedProject
         menu.addItem(makeSectionHeaderItem(
-            title: projectCatalog?.selectedProject?.name ?? "No project selected"
+            title: selectedProject?.name ?? "No project selected",
+            showsRefreshButton: selectedProject != nil,
+            refreshButtonEnabled: selectedProject.map {
+                !manuallyRefreshingProjectURLs.contains($0.url)
+            } ?? false
         ))
 
         if let project = projectCatalog?.selectedProject {
@@ -511,6 +722,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                     makeConfigurationItem(
                         configuration,
                         projectURL: project.url,
+                        isRefreshing: refreshingProjectURLs.contains(project.activeContainerURL),
                         isSelectedForPlay: configuration.scheme
                             == project.selectedLaunchConfigurationScheme
                     )
@@ -519,10 +731,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         }
         if let projectURL = projectCatalog?.selectedProject?.activeContainerURL {
             let message: String?
-            if refreshingProjectURLs.contains(projectURL) {
-                message = "Refreshing destinations…"
-            } else if let failedSchemes = destinationRefreshErrors[projectURL], !failedSchemes.isEmpty {
-                message = "Could not refresh \(failedSchemes.sorted().joined(separator: ", ")). Reopen menu to retry."
+            if let failedSchemes = destinationRefreshErrors[projectURL], !failedSchemes.isEmpty {
+                message = "Could not refresh \(failedSchemes.sorted().joined(separator: ", ")). Use Refresh to retry."
             } else {
                 message = nil
             }
@@ -550,6 +760,10 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                 item.tag = index
                 item.state = project == projectCatalog?.selectedProject ? .on : .off
                 item.isEnabled = true
+                let row = MenuDetailItemView(title: project.name, detail: "",
+                    selection: item.state == .on, showsChevron: false)
+                row.addProjectAction(target: self, action: #selector(selectProjectButton(_:)), index: index)
+                item.view = row
                 menu.addItem(item)
             }
         } else {
@@ -605,13 +819,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     func menuWillOpen(_ menu: NSMenu) {
-        guard menu === contextMenu else {
+        if menu !== contextMenu {
             trackedSubmenus.insert(ObjectIdentifier(menu))
-            return
-        }
-        Task { [weak self] in
-            await self?.refreshWorkingCopies()
-            await self?.refreshDestinations()
         }
     }
 
@@ -707,6 +916,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private func makeConfigurationItem(
         _ configuration: LaunchConfiguration,
         projectURL: URL,
+        isRefreshing: Bool,
         isSelectedForPlay: Bool
     ) -> NSMenuItem {
         let destinationTitle: String
@@ -723,7 +933,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             keyEquivalent: ""
         )
         item.isEnabled = true
-        item.setAccessibilityLabel("\(configuration.scheme), \(destinationTitle)")
+        let accessibilityDetail = isRefreshing ? "Refreshing destinations" : destinationTitle
+        item.setAccessibilityLabel("\(configuration.scheme), \(accessibilityDetail)")
         item.state = isSelectedForPlay ? .on : .off
         let destinationMenu = NSMenu(title: configuration.scheme)
         destinationMenu.autoenablesItems = false
@@ -773,7 +984,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             destination: destinationTitle,
             isSelectedForPlay: isSelectedForPlay,
             projectURL: projectURL,
-            destinationMenu: destinationMenu
+            destinationMenu: destinationMenu,
+            isRefreshing: isRefreshing
         )
         return item
     }
@@ -783,14 +995,16 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         destination: String,
         isSelectedForPlay: Bool,
         projectURL: URL,
-        destinationMenu: NSMenu
+        destinationMenu: NSMenu,
+        isRefreshing: Bool
     ) -> NSView {
         let row = MenuDetailItemView(
             title: scheme,
             detail: destination,
             selection: isSelectedForPlay,
             showsChevron: false,
-            trailingAccessoryWidth: 78
+            trailingAccessoryWidth: 36,
+            showsProgressIndicator: isRefreshing
         )
         row.addConfigurationActions(
             target: self,
@@ -811,11 +1025,19 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         let row = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 54))
         row.autoresizingMask = [.width]
         let playButton = NSButton(title: "Run", target: self, action: #selector(playFromMenu))
+        playButton.cell = MenuRunButtonCell(textCell: "Run")
+        playButton.target = self
+        playButton.action = #selector(playFromMenu)
         playButton.identifier = NSUserInterfaceItemIdentifier("run-project-button")
         playButton.bezelStyle = .rounded
         playButton.controlSize = .large
         playButton.font = .systemFont(ofSize: 16, weight: .medium)
-        playButton.bezelColor = .controlAccentColor
+        playButton.bezelColor = .systemBlue
+        #if compiler(>=6.2)
+        if #available(macOS 26.0, *) {
+            playButton.tintProminence = .primary
+        }
+        #endif
         playButton.image = menuBarImage(description: "XPlay")
         playButton.imagePosition = .imageLeading
         playButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -1061,10 +1283,15 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     private func makeSectionHeaderItem(
-        title: String, showsEditButton: Bool = false, overflowMenu: NSMenu? = nil
+        title: String,
+        showsEditButton: Bool = false,
+        overflowMenu: NSMenu? = nil,
+        showsRefreshButton: Bool = false,
+        refreshButtonEnabled: Bool = true
     ) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        item.isEnabled = overflowMenu != nil || (showsEditButton && onEditProjects != nil)
+        item.isEnabled = overflowMenu != nil || showsRefreshButton
+            || (showsEditButton && onEditProjects != nil)
 
         let headerView = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 28))
         headerView.autoresizingMask = [.width]
@@ -1081,7 +1308,35 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             titleLabel.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
         ])
 
-        if let overflowMenu {
+        if showsRefreshButton {
+            let refreshButton = NSButton(
+                title: "",
+                target: self,
+                action: #selector(refreshSelectedProject(_:))
+            )
+            refreshButton.identifier = NSUserInterfaceItemIdentifier("refresh-selected-project")
+            refreshButton.image = NSImage(
+                systemSymbolName: "arrow.clockwise",
+                accessibilityDescription: "Refresh"
+            )
+            refreshButton.imagePosition = .imageOnly
+            refreshButton.isBordered = false
+            refreshButton.isEnabled = refreshButtonEnabled
+            refreshButton.toolTip = "Refresh \(title)"
+            refreshButton.setAccessibilityLabel("Refresh \(title)")
+            refreshButton.translatesAutoresizingMaskIntoConstraints = false
+            headerView.addSubview(refreshButton)
+            NSLayoutConstraint.activate([
+                refreshButton.trailingAnchor.constraint(equalTo: headerView.trailingAnchor, constant: -8),
+                refreshButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
+                refreshButton.widthAnchor.constraint(equalToConstant: 24),
+                refreshButton.heightAnchor.constraint(equalToConstant: 22),
+                titleLabel.trailingAnchor.constraint(
+                    lessThanOrEqualTo: refreshButton.leadingAnchor,
+                    constant: -8
+                ),
+            ])
+        } else if let overflowMenu {
             let moreButton = NSButton(title: "Show More…", target: self, action: #selector(showButtonSubmenu(_:)))
             moreButton.identifier = NSUserInterfaceItemIdentifier("show-more-branches")
             moreButton.menu = overflowMenu
@@ -1133,7 +1388,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         label.font = .menuFont(ofSize: NSFont.systemFontSize)
         label.translatesAutoresizingMaskIntoConstraints = false
 
-        let toggle = NSSwitch(frame: .zero)
+        let toggle = MenuTintedSwitch(title: title)
         toggle.controlSize = .small
         toggle.state = isOn ? .on : .off
         toggle.target = self
@@ -1205,6 +1460,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         }
     ) {
         self.projectCatalog = projectCatalog
+        observedSelectedProjectURL = projectCatalog?.selectedProject?.url
         self.schemeResolver = schemeResolver
         self.appSettings = appSettings ?? AppSettings()
         self.onEditProjects = onEditProjects
@@ -1438,7 +1694,40 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     @objc
     private func selectProject(_ item: NSMenuItem) {
-        projectCatalog?.selectProject(at: item.tag)
+        selectProject(at: item.tag)
+    }
+
+    @objc
+    private func refreshSelectedProject(_ button: NSButton) {
+        guard let projectURL = projectCatalog?.selectedProject?.url,
+              manuallyRefreshingProjectURLs.insert(projectURL).inserted else {
+            return
+        }
+        button.isEnabled = false
+        Task { [weak self] in
+            await self?.refreshSelectedProject(at: projectURL)
+        }
+    }
+
+    private func refreshSelectedProject(at projectURL: URL) async {
+        defer {
+            manuallyRefreshingProjectURLs.remove(projectURL)
+            rebuildContextMenu()
+            refreshConfiguration()
+        }
+        await refreshWorkingCopies(force: true)
+        guard projectCatalog?.selectedProject?.url == projectURL else { return }
+        await refreshDestinations()
+    }
+
+    @objc private func selectProjectButton(_ button: NSButton) {
+        contextMenu.cancelTracking()
+        selectProject(at: button.tag)
+    }
+
+    private func selectProject(at index: Int) {
+        projectCatalog?.selectProject(at: index)
+        observedSelectedProjectURL = projectCatalog?.selectedProject?.url
         onCatalogChange?()
         contextMenu = makeContextMenu()
         refreshConfiguration()
@@ -1518,7 +1807,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     @objc
-    private func setMacroAcceptance(_ toggle: NSSwitch) {
+    private func setMacroAcceptance(_ toggle: MenuTintedSwitch) {
         if toggle.state == .on {
             guard confirmMacroAcceptance() else {
                 toggle.state = .off
@@ -1572,7 +1861,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             description = "Refreshing destinations…"
         } else if let url = project?.url, let configuration,
                   destinationRefreshErrors[url]?.contains(configuration.scheme) == true {
-            description = "Could not refresh destinations. Reopen menu to retry."
+            description = "Could not refresh destinations. Use Refresh to retry."
         } else if canStart {
             description = "Start project"
         } else if configuration != nil {
@@ -1601,6 +1890,19 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         button.setAccessibilityHelp([destination?.displayName, menuHint].compactMap { $0 }.joined(separator: ". "))
         button.toolTip = activeLaunchPlan == nil ? "XPlay" : description
         updateLaunchButtons()
+    }
+
+    func projectCatalogDidChange() {
+        let selectedProjectURL = projectCatalog?.selectedProject?.url
+        let selectionChanged = observedSelectedProjectURL != selectedProjectURL
+        observedSelectedProjectURL = selectedProjectURL
+        rebuildContextMenu()
+        refreshConfiguration()
+        guard selectionChanged, selectedProjectURL != nil else { return }
+        Task { [weak self] in
+            await self?.refreshWorkingCopies()
+            await self?.refreshDestinations()
+        }
     }
 
     private func menuBarImage(description: String) -> NSImage? {
@@ -1632,7 +1934,7 @@ private extension StatusBarController {
     func addWorkingCopyItems(to menu: NSMenu) {
         guard let project = projectCatalog?.selectedProject else { return }
         if let error = workingCopyErrors[project.url] {
-            let item = NSMenuItem(title: "Could not read branches. Reopen menu to retry.",
+            let item = NSMenuItem(title: "Could not read branches. Use Refresh to retry.",
                                   action: nil, keyEquivalent: "")
             item.isEnabled = false
             item.toolTip = error
@@ -1668,8 +1970,9 @@ private extension StatusBarController {
         item.identifier = NSUserInterfaceItemIdentifier("working-copy")
         item.representedObject = copy.id
         item.target = self
-        let row = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: item.subtitle == nil ? 28 : 44))
-        row.autoresizingMask = [.width]
+        let activityTitle = workingCopyActivityTitle(copy)
+        let row = MenuDetailItemView(title: copy.displayName, detail: activityTitle,
+            selection: false, showsChevron: false)
         let button = BranchSelectionButton(copy: copy, target: self, action: #selector(selectWorkingCopyButton(_:)))
         row.addSubview(button)
         item.view = row
@@ -1677,7 +1980,7 @@ private extension StatusBarController {
         item.isEnabled = !isSelectingWorkingCopy && !isRunning && !appSettings.automaticallySelectLatestBranch
             && (copy.rootURL == nil || copy.containerURL != nil)
         item.toolTip = workingCopyToolTip(copy)
-        button.update(copy: copy, subtitle: item.subtitle,
+        button.update(copy: copy, subtitle: item.subtitle, activityTitle: activityTitle,
             selected: item.state == .on, enabled: item.isEnabled)
         row.frame.size = button.frame.size
         button.frame = row.bounds
@@ -1690,6 +1993,17 @@ private extension StatusBarController {
         return [copy.displayName, copy.rootURL?.path ?? "Create a separate worktree when selected",
                 copy.isDirty ? "Modified" : nil, "Last activity: \(date)"]
             .compactMap { $0 }.joined(separator: "\n")
+    }
+
+    func workingCopyActivityTitle(_ copy: GitWorkingCopy, relativeTo now: Date = .now) -> String {
+        guard abs(now.timeIntervalSince(copy.lastActivity)) >= 60 else {
+            return "Just now"
+        }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.locale = Locale(identifier: "en")
+        formatter.dateTimeStyle = .numeric
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: copy.lastActivity, relativeTo: now)
     }
 
     func refreshVisibleBranchSelection() {
@@ -1709,7 +2023,9 @@ private extension StatusBarController {
                     item.state = currentWorkingCopy(for: project)?.id == copy.id ? .on : .off
                     item.isEnabled = !isSelectingWorkingCopy && !isRunning && !appSettings.automaticallySelectLatestBranch
                         && (copy.rootURL == nil || copy.containerURL != nil)
-                    button.update(copy: copy, subtitle: item.subtitle, selected: item.state == .on, enabled: item.isEnabled)
+                    button.update(copy: copy, subtitle: item.subtitle,
+                        activityTitle: workingCopyActivityTitle(copy),
+                        selected: item.state == .on, enabled: item.isEnabled)
                     item.toolTip = workingCopyToolTip(copy)
                     button.toolTip = item.toolTip
                 }
@@ -1753,7 +2069,7 @@ private extension StatusBarController {
         return item
     }
 
-    @objc func setAutomaticBranchSelection(_ toggle: NSSwitch) {
+    @objc func setAutomaticBranchSelection(_ toggle: MenuTintedSwitch) {
         appSettings.setAutomaticallySelectLatestBranch(toggle.state == .on)
         rebuildContextMenu()
         refreshConfiguration()

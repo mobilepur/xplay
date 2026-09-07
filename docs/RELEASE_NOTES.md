@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+## 1.1.2 — 2026-09-07
+
+### Added
+
+- Add `run-dev.sh` as a short launcher for the local development build.
+- Add a manual project refresh control to update branches and destinations on
+  demand.
+
+### Changed
+
+- Keep cached branches and destinations when reopening the menu so it appears
+  immediately without transient loading indicators.
+- Show recent branch activity and worktree details with aligned, blue
+  single-selection indicators.
+- Tint Run and enabled settings switches blue, and use compact chevrons for
+  device selection.
+
+### Fixed
+
+- Keep menu height stable while builds and destination refreshes are running.
+- Preserve an open device picker during catalog and destination updates.
+- Refresh branches and destinations when the selected project actually changes,
+  including changes made in the project editor.
+
 ## 1.1.1 — 2026-09-06
 
 ### Changed

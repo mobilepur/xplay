@@ -4,10 +4,11 @@ import XCTest
 
 @MainActor
 final class WorkingCopyMenuTests: XCTestCase {
-    func testBranchRowsShowOnlyNameWithNativeWorktreeSubtitle() async throws {
+    func testBranchRowsShowNameWorktreeSubtitleAndRecentActivity() async throws {
         let fixture = try Fixture()
         defer { fixture.remove() }
-        let newCopy = GitWorkingCopy(id: "new", branchName: "feature/new", head: "abc1234",
+        let freshBranchName = "feature/a-very-long-branch-name-that-needs-truncation"
+        let newCopy = GitWorkingCopy(id: "new", branchName: freshBranchName, head: "abc1234",
             rootURL: nil, containerURL: nil, lastActivity: .now, isDirty: false, isMainWorktree: false)
         let controller = StatusBarController(projectCatalog: fixture.catalog,
             appSettings: AppSettings(defaults: fixture.defaults),
@@ -15,8 +16,32 @@ final class WorkingCopyMenuTests: XCTestCase {
                 rootURL: fixture.directory, workingCopies: [fixture.copies[4], fixture.copies[0], newCopy])))
         await controller.refreshWorkingCopies()
         let rows = controller.contextMenu.items.filter { $0.identifier?.rawValue == "working-copy" }
-        XCTAssertEqual(rows.map(\.title), ["main", "feature-0", "feature/new"])
+        XCTAssertEqual(rows.map(\.title), ["main", "feature-0", freshBranchName])
         XCTAssertEqual(rows.map(\.subtitle), [nil, "Worktree", "New Worktree"])
+        let activityLabels = try rows.map { item in
+            try XCTUnwrap(item.view?.subviews.compactMap { $0 as? NSTextField }.first {
+                $0.identifier?.rawValue == "selection-detail"
+            })
+        }
+        XCTAssertTrue(activityLabels.allSatisfy { !$0.stringValue.isEmpty })
+        XCTAssertEqual(activityLabels[2].stringValue, "Just now")
+        for (item, activityLabel) in zip(rows, activityLabels) {
+            let row = try XCTUnwrap(item.view)
+            for width in [row.frame.width, CGFloat(600)] {
+                row.frame.size.width = width
+                row.layoutSubtreeIfNeeded()
+                XCTAssertEqual(activityLabel.alignment, .right)
+                XCTAssertEqual(
+                    activityLabel.alignmentRect(forFrame: activityLabel.frame).maxX,
+                    row.bounds.maxX - 12,
+                    accuracy: 0.5
+                )
+                XCTAssertGreaterThanOrEqual(
+                    activityLabel.frame.width,
+                    activityLabel.intrinsicContentSize.width - 0.5
+                )
+            }
+        }
         let schemeRow = try XCTUnwrap(controller.contextMenu.items.compactMap(\.view).first {
             $0.subviews.contains { $0.identifier?.rawValue == "scheme-selection-button" }
         })
@@ -24,17 +49,30 @@ final class WorkingCopyMenuTests: XCTestCase {
         let schemeLabel = try XCTUnwrap(schemeRow.subviews.compactMap { $0 as? NSTextField }.first {
             $0.stringValue == "Example"
         })
-        let schemeCheckmark = try XCTUnwrap(schemeRow.subviews.first {
+        let schemeCheckmark = try XCTUnwrap(schemeRow.subviews.compactMap { $0 as? NSImageView }.first {
             $0.identifier?.rawValue == "configuration-checkmark"
         })
-        for item in rows {
+        XCTAssertEqual(schemeCheckmark.contentTintColor, .systemBlue)
+        let projectItem = try XCTUnwrap(controller.contextMenu.items.first { $0.title == fixture.catalog.selectedProject?.name && $0.action != nil })
+        for item in rows + [projectItem] {
             let row = try XCTUnwrap(item.view)
             let button = try XCTUnwrap(row.subviews.compactMap { $0 as? NSButton }.first)
+            let label = try XCTUnwrap(row.subviews.compactMap { $0 as? NSTextField }.first {
+                $0.identifier?.rawValue == "selection-title"
+            })
+            let checkbox = try XCTUnwrap(row.subviews.compactMap { $0 as? NSImageView }.first {
+                $0.identifier?.rawValue == "configuration-checkmark"
+            })
+            XCTAssertFalse(checkbox.isHidden, "Unselected rows keep an empty circle in the same column")
+            if item.state == .on {
+                XCTAssertEqual(checkbox.contentTintColor, .systemBlue)
+            }
             for width in [row.frame.width, CGFloat(600)] {
                 row.frame.size.width = width
-                let cell = try XCTUnwrap(button.cell as? NSButtonCell)
-                XCTAssertEqual(cell.titleRect(forBounds: button.bounds).minX, schemeLabel.frame.minX + schemeLabel.cell!.titleRect(forBounds: schemeLabel.bounds).minX, accuracy: 0.5)
-                XCTAssertEqual(cell.imageRect(forBounds: button.bounds).minX, schemeCheckmark.frame.minX, accuracy: 0.5)
+                row.layoutSubtreeIfNeeded()
+                XCTAssertEqual(label.frame.minX, schemeLabel.frame.minX, accuracy: 0.5)
+                XCTAssertEqual(checkbox.frame.minX, schemeCheckmark.frame.minX, accuracy: 0.5)
+                XCTAssertEqual(checkbox.frame.size, schemeCheckmark.frame.size)
                 XCTAssertTrue(row.hitTest(NSPoint(x: width - 1, y: row.bounds.midY)) === button,
                               "The entire row remains selectable, including its right edge")
             }
@@ -71,6 +109,51 @@ final class WorkingCopyMenuTests: XCTestCase {
         XCTAssertEqual(current.title, "Branch: main")
         XCTAssertEqual(current.toolTip, fixture.anchor.path)
         XCTAssertEqual(menu.index(of: current) + 1, menu.index(of: menu.items.first { $0.title == "Run Project" }!))
+    }
+
+    func testProjectHeaderRefreshUpdatesCachedBranches() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let initial = GitRepositoryState(
+            rootURL: fixture.directory,
+            workingCopies: [fixture.copies[4]]
+        )
+        let updated = GitRepositoryState(
+            rootURL: fixture.directory,
+            workingCopies: [fixture.copies[0], fixture.copies[4]]
+        )
+        let resolver = MutableMenuResolver(state: initial)
+        let controller = StatusBarController(
+            projectCatalog: fixture.catalog,
+            appSettings: AppSettings(defaults: fixture.defaults),
+            schemeResolver: XcodeSchemeResolver { _ in
+                Data("{ platform:macOS, id:mac, name:My Mac }".utf8)
+            },
+            workingCopyResolver: resolver
+        )
+        await controller.refreshWorkingCopies()
+        XCTAssertEqual(
+            controller.contextMenu.items.filter { $0.identifier?.rawValue == "working-copy" }.map(\.title),
+            ["main"]
+        )
+
+        resolver.setState(updated)
+        let header = try XCTUnwrap(controller.contextMenu.items.first { $0.title == "Example" })
+        let refreshButton = try XCTUnwrap(
+            header.view?.subviews.compactMap { $0 as? NSButton }.first {
+                $0.identifier?.rawValue == "refresh-selected-project"
+            }
+        )
+        refreshButton.performClick(nil)
+
+        let refreshed = expectation(for: NSPredicate { _, _ in
+            MainActor.assumeIsolated {
+                controller.contextMenu.items.filter {
+                    $0.identifier?.rawValue == "working-copy"
+                }.map(\.title) == ["feature-0", "main"]
+            }
+        }, evaluatedWith: nil)
+        await fulfillment(of: [refreshed], timeout: 3)
     }
 
     func testSelectingOverflowWorktreeRoutesRunOpenAndDiscoveryToSameContainer() async throws {
@@ -172,7 +255,7 @@ final class WorkingCopyMenuTests: XCTestCase {
         resolver.setFailure(true)
         await controller.refreshWorkingCopies()
         XCTAssertNotNil(controller.contextMenu.items.first {
-            $0.title == "Could not read branches. Reopen menu to retry."
+            $0.title == "Could not read branches. Use Refresh to retry."
         })
         XCTAssertEqual(controller.contextMenu.items.first {
             $0.identifier?.rawValue == "current-branch"
@@ -180,7 +263,7 @@ final class WorkingCopyMenuTests: XCTestCase {
         resolver.setFailure(false)
         await controller.refreshWorkingCopies()
         XCTAssertNil(controller.contextMenu.items.first {
-            $0.title == "Could not read branches. Reopen menu to retry."
+            $0.title == "Could not read branches. Use Refresh to retry."
         })
         XCTAssertEqual(controller.contextMenu.items.first {
             $0.identifier?.rawValue == "current-branch"
@@ -207,7 +290,7 @@ final class WorkingCopyMenuTests: XCTestCase {
         let item = try XCTUnwrap(controller.contextMenu.items.first {
             $0.title == "Automatically Select Latest Branch"
         })
-        let toggle = try XCTUnwrap(item.view?.subviews.compactMap { $0 as? NSSwitch }.first)
+        let toggle = try XCTUnwrap(item.view?.subviews.compactMap { $0 as? MenuTintedSwitch }.first)
         XCTAssertEqual(toggle.state, .off)
         toggle.state = .on
         toggle.sendAction(toggle.action, to: toggle.target)
@@ -219,7 +302,7 @@ final class WorkingCopyMenuTests: XCTestCase {
         let reloaded = fixture.controller()
         let persisted = try XCTUnwrap(reloaded.contextMenu.items.first {
             $0.title == "Automatically Select Latest Branch"
-        }?.view?.subviews.compactMap { $0 as? NSSwitch }.first)
+        }?.view?.subviews.compactMap { $0 as? MenuTintedSwitch }.first)
         XCTAssertEqual(persisted.state, .on)
         toggle.state = .off
         toggle.sendAction(toggle.action, to: toggle.target)
@@ -257,7 +340,7 @@ final class WorkingCopyMenuTests: XCTestCase {
         controller.perform(.startProject)
         let toggle = try XCTUnwrap(controller.contextMenu.items.first {
             $0.title == "Automatically Select Latest Branch"
-        }?.view?.subviews.compactMap { $0 as? NSSwitch }.first)
+        }?.view?.subviews.compactMap { $0 as? MenuTintedSwitch }.first)
         toggle.state = .on
         toggle.sendAction(toggle.action, to: toggle.target)
         await controller.refreshWorkingCopies(force: true)
@@ -339,6 +422,35 @@ private struct MenuTestResolver: GitWorkingCopyResolving {
     let state: GitRepositoryState?
     func discover(containerURL: URL) throws -> GitRepositoryState? { state }
     func prepare(_ copy: GitWorkingCopy, for containerURL: URL, worktreesDirectory: URL) throws -> URL {
+        try XCTUnwrap(copy.containerURL)
+    }
+}
+
+private final class MutableMenuResolver: GitWorkingCopyResolving, @unchecked Sendable {
+    private let lock = NSLock()
+    private var state: GitRepositoryState?
+
+    init(state: GitRepositoryState?) {
+        self.state = state
+    }
+
+    func setState(_ state: GitRepositoryState?) {
+        lock.lock()
+        defer { lock.unlock() }
+        self.state = state
+    }
+
+    func discover(containerURL: URL) throws -> GitRepositoryState? {
+        lock.lock()
+        defer { lock.unlock() }
+        return state
+    }
+
+    func prepare(
+        _ copy: GitWorkingCopy,
+        for containerURL: URL,
+        worktreesDirectory: URL
+    ) throws -> URL {
         try XCTUnwrap(copy.containerURL)
     }
 }
