@@ -224,6 +224,18 @@ final class StatusBarControllerTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(row.frame.height, 48)
             let open = try XCTUnwrap(buttons.first { $0.identifier?.rawValue == "open-project-button" })
             let openRect = open.alignmentRect(forFrame: open.frame)
+            XCTAssertEqual(play.frame.width, open.frame.width, accuracy: 0.5)
+            XCTAssertEqual(
+                try XCTUnwrap(play.cell).drawingRect(forBounds: play.bounds).width,
+                try XCTUnwrap(open.cell).drawingRect(forBounds: open.bounds).width,
+                accuracy: 0.5
+            )
+            let playCell = try XCTUnwrap(play.cell as? MenuRunButtonCell)
+            let playBezel = playCell.bezelRect(forFrame: play.bounds)
+            let openBezel = try XCTUnwrap(open.cell).drawingRect(forBounds: open.bounds)
+            XCTAssertEqual(playBezel.minX, openBezel.minX, accuracy: 0.5)
+            XCTAssertEqual(playBezel.width, openBezel.width, accuracy: 0.5)
+            XCTAssertEqual(playCell.bezelCornerRadius(for: playBezel), 6, accuracy: 0.5)
             XCTAssertEqual(openRect.minX - playAlignmentRect.maxX, 8, accuracy: 0.5)
             XCTAssertEqual(stopAlignmentRect.minX - openRect.maxX, 8, accuracy: 0.5)
             XCTAssertGreaterThanOrEqual(playAlignmentRect.width, play.intrinsicContentSize.width)

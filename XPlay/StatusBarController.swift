@@ -96,7 +96,7 @@ final class MenuTintedSwitch: NSControl {
 }
 
 @MainActor
-private final class MenuRunButtonCell: NSButtonCell {
+final class MenuRunButtonCell: NSButtonCell {
     override var interiorBackgroundStyle: NSView.BackgroundStyle {
         isEnabled ? .emphasized : super.interiorBackgroundStyle
     }
@@ -106,14 +106,18 @@ private final class MenuRunButtonCell: NSButtonCell {
             super.drawBezel(withFrame: frame, in: controlView)
             return
         }
-        let content = drawingRect(forBounds: frame)
-        let bezel = NSRect(x: frame.minX, y: content.minY, width: frame.width, height: content.height)
-        let radius: CGFloat
-        if #available(macOS 26.0, *) { radius = bezel.height / 2 } else { radius = 6 }
+        let bezel = bezelRect(forFrame: frame)
+        let radius = bezelCornerRadius(for: bezel)
         let color = isHighlighted ? NSColor.systemBlue.blended(withFraction: 0.18, of: .black)! : .systemBlue
         color.setFill()
         NSBezierPath(roundedRect: bezel, xRadius: radius, yRadius: radius).fill()
     }
+
+    func bezelRect(forFrame frame: NSRect) -> NSRect {
+        drawingRect(forBounds: frame)
+    }
+
+    func bezelCornerRadius(for _: NSRect) -> CGFloat { 6 }
 
     override func drawTitle(_ title: NSAttributedString, withFrame frame: NSRect, in controlView: NSView) -> NSRect {
         guard isEnabled else { return super.drawTitle(title, withFrame: frame, in: controlView) }
