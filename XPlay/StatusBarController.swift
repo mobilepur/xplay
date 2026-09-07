@@ -114,7 +114,13 @@ final class MenuRunButtonCell: NSButtonCell {
     }
 
     func bezelRect(forFrame frame: NSRect) -> NSRect {
-        drawingRect(forBounds: frame)
+        let contentRect = drawingRect(forBounds: frame)
+        return NSRect(
+            x: frame.minX + 6,
+            y: contentRect.minY,
+            width: max(0, frame.width - 12),
+            height: contentRect.height
+        )
     }
 
     func bezelCornerRadius(for _: NSRect) -> CGFloat { 6 }
