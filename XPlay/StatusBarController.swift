@@ -658,6 +658,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private(set) var statusItem: NSStatusItem
     private let statusItemView: StatusItemView
     private let projectCatalog: ProjectCatalog?
+    private var observedSelectedProjectURL: URL?
     private let schemeResolver: XcodeSchemeResolver
     private let appSettings: AppSettings
     private let onEditProjects: (() -> Void)?
@@ -687,6 +688,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private weak var destinationMenuParent: NSMenuItem?
     private var deferredMenuRefresh = false
     private var refreshingProjectURLs = Set<URL>()
+    private var manuallyRefreshingProjectURLs = Set<URL>()
     private var destinationRefreshErrors: [URL: Set<String>] = [:]
     private var activeLauncher: (any ProjectLaunching)?
     private var activeLaunchID: UUID?
@@ -704,8 +706,13 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         menu.autoenablesItems = false
         menu.delegate = self
 
+        let selectedProject = projectCatalog?.selectedProject
         menu.addItem(makeSectionHeaderItem(
-            title: projectCatalog?.selectedProject?.name ?? "No project selected"
+            title: selectedProject?.name ?? "No project selected",
+            showsRefreshButton: selectedProject != nil,
+            refreshButtonEnabled: selectedProject.map {
+                !manuallyRefreshingProjectURLs.contains($0.url)
+            } ?? false
         ))
 
         if let project = projectCatalog?.selectedProject {
@@ -725,7 +732,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         if let projectURL = projectCatalog?.selectedProject?.activeContainerURL {
             let message: String?
             if let failedSchemes = destinationRefreshErrors[projectURL], !failedSchemes.isEmpty {
-                message = "Could not refresh \(failedSchemes.sorted().joined(separator: ", ")). Reopen menu to retry."
+                message = "Could not refresh \(failedSchemes.sorted().joined(separator: ", ")). Use Refresh to retry."
             } else {
                 message = nil
             }
@@ -812,13 +819,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     func menuWillOpen(_ menu: NSMenu) {
-        guard menu === contextMenu else {
+        if menu !== contextMenu {
             trackedSubmenus.insert(ObjectIdentifier(menu))
-            return
-        }
-        Task { [weak self] in
-            await self?.refreshWorkingCopies()
-            await self?.refreshDestinations()
         }
     }
 
@@ -1279,10 +1281,15 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     private func makeSectionHeaderItem(
-        title: String, showsEditButton: Bool = false, overflowMenu: NSMenu? = nil
+        title: String,
+        showsEditButton: Bool = false,
+        overflowMenu: NSMenu? = nil,
+        showsRefreshButton: Bool = false,
+        refreshButtonEnabled: Bool = true
     ) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        item.isEnabled = overflowMenu != nil || (showsEditButton && onEditProjects != nil)
+        item.isEnabled = overflowMenu != nil || showsRefreshButton
+            || (showsEditButton && onEditProjects != nil)
 
         let headerView = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 28))
         headerView.autoresizingMask = [.width]
@@ -1299,7 +1306,35 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             titleLabel.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
         ])
 
-        if let overflowMenu {
+        if showsRefreshButton {
+            let refreshButton = NSButton(
+                title: "",
+                target: self,
+                action: #selector(refreshSelectedProject(_:))
+            )
+            refreshButton.identifier = NSUserInterfaceItemIdentifier("refresh-selected-project")
+            refreshButton.image = NSImage(
+                systemSymbolName: "arrow.clockwise",
+                accessibilityDescription: "Refresh"
+            )
+            refreshButton.imagePosition = .imageOnly
+            refreshButton.isBordered = false
+            refreshButton.isEnabled = refreshButtonEnabled
+            refreshButton.toolTip = "Refresh \(title)"
+            refreshButton.setAccessibilityLabel("Refresh \(title)")
+            refreshButton.translatesAutoresizingMaskIntoConstraints = false
+            headerView.addSubview(refreshButton)
+            NSLayoutConstraint.activate([
+                refreshButton.trailingAnchor.constraint(equalTo: headerView.trailingAnchor, constant: -8),
+                refreshButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
+                refreshButton.widthAnchor.constraint(equalToConstant: 24),
+                refreshButton.heightAnchor.constraint(equalToConstant: 22),
+                titleLabel.trailingAnchor.constraint(
+                    lessThanOrEqualTo: refreshButton.leadingAnchor,
+                    constant: -8
+                ),
+            ])
+        } else if let overflowMenu {
             let moreButton = NSButton(title: "Show More…", target: self, action: #selector(showButtonSubmenu(_:)))
             moreButton.identifier = NSUserInterfaceItemIdentifier("show-more-branches")
             moreButton.menu = overflowMenu
@@ -1423,6 +1458,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         }
     ) {
         self.projectCatalog = projectCatalog
+        observedSelectedProjectURL = projectCatalog?.selectedProject?.url
         self.schemeResolver = schemeResolver
         self.appSettings = appSettings ?? AppSettings()
         self.onEditProjects = onEditProjects
@@ -1659,6 +1695,29 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         selectProject(at: item.tag)
     }
 
+    @objc
+    private func refreshSelectedProject(_ button: NSButton) {
+        guard let projectURL = projectCatalog?.selectedProject?.url,
+              manuallyRefreshingProjectURLs.insert(projectURL).inserted else {
+            return
+        }
+        button.isEnabled = false
+        Task { [weak self] in
+            await self?.refreshSelectedProject(at: projectURL)
+        }
+    }
+
+    private func refreshSelectedProject(at projectURL: URL) async {
+        defer {
+            manuallyRefreshingProjectURLs.remove(projectURL)
+            rebuildContextMenu()
+            refreshConfiguration()
+        }
+        await refreshWorkingCopies(force: true)
+        guard projectCatalog?.selectedProject?.url == projectURL else { return }
+        await refreshDestinations()
+    }
+
     @objc private func selectProjectButton(_ button: NSButton) {
         contextMenu.cancelTracking()
         selectProject(at: button.tag)
@@ -1666,6 +1725,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     private func selectProject(at index: Int) {
         projectCatalog?.selectProject(at: index)
+        observedSelectedProjectURL = projectCatalog?.selectedProject?.url
         onCatalogChange?()
         contextMenu = makeContextMenu()
         refreshConfiguration()
@@ -1799,7 +1859,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             description = "Refreshing destinations…"
         } else if let url = project?.url, let configuration,
                   destinationRefreshErrors[url]?.contains(configuration.scheme) == true {
-            description = "Could not refresh destinations. Reopen menu to retry."
+            description = "Could not refresh destinations. Use Refresh to retry."
         } else if canStart {
             description = "Start project"
         } else if configuration != nil {
@@ -1828,6 +1888,19 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         button.setAccessibilityHelp([destination?.displayName, menuHint].compactMap { $0 }.joined(separator: ". "))
         button.toolTip = activeLaunchPlan == nil ? "XPlay" : description
         updateLaunchButtons()
+    }
+
+    func projectCatalogDidChange() {
+        let selectedProjectURL = projectCatalog?.selectedProject?.url
+        let selectionChanged = observedSelectedProjectURL != selectedProjectURL
+        observedSelectedProjectURL = selectedProjectURL
+        rebuildContextMenu()
+        refreshConfiguration()
+        guard selectionChanged, selectedProjectURL != nil else { return }
+        Task { [weak self] in
+            await self?.refreshWorkingCopies()
+            await self?.refreshDestinations()
+        }
     }
 
     private func menuBarImage(description: String) -> NSImage? {
@@ -1859,7 +1932,7 @@ private extension StatusBarController {
     func addWorkingCopyItems(to menu: NSMenu) {
         guard let project = projectCatalog?.selectedProject else { return }
         if let error = workingCopyErrors[project.url] {
-            let item = NSMenuItem(title: "Could not read branches. Reopen menu to retry.",
+            let item = NSMenuItem(title: "Could not read branches. Use Refresh to retry.",
                                   action: nil, keyEquivalent: "")
             item.isEnabled = false
             item.toolTip = error

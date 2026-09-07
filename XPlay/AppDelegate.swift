@@ -7,7 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var projectWindowController = ProjectWindowController(
         catalog: projectCatalog,
         onCatalogChange: { [weak self] in
-            self?.statusBarController?.refreshConfiguration()
+            self?.statusBarController?.projectCatalogDidChange()
         }
     )
     private var statusBarController: StatusBarController?

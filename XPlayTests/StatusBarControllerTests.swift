@@ -169,7 +169,7 @@ final class StatusBarControllerTests: XCTestCase {
             controller.perform(.startProject)
             XCTAssertEqual(menu.size.height, idleHeight)
 
-            // Opening the menu during a build refreshes destinations asynchronously.
+            // A manual destination refresh keeps the menu height stable.
             let refresh = Task { await controller.refreshDestinations() }
             await fulfillment(of: [started], timeout: 2)
             let refreshingHeight = menu.size.height
@@ -846,6 +846,8 @@ final class StatusBarControllerTests: XCTestCase {
             })
             button.performClick(nil)
             let submenu = try XCTUnwrap(item.submenu)
+            controller.projectCatalogDidChange()
+            XCTAssertTrue(controller.contextMenu === mainMenu)
             await controller.refreshDestinations()
             XCTAssertTrue(mainMenu.items.contains { $0 === item })
             XCTAssertTrue(item.submenu === submenu)
@@ -1378,15 +1380,18 @@ final class StatusBarControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testOpeningMenuRefreshesDestinationsWithoutOpeningProjectEditor() async throws {
+    func testOpeningMenuKeepsCachedDestinationsUntilProjectHeaderRefreshIsClicked() async throws {
         let suiteName = "StatusBarControllerTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let catalog = ProjectCatalog(defaults: defaults, storageKey: "projects")
         let old = XcodeDestination(platform: .iOSSimulator, id: "old", name: "Removed iPhone")
         configure(catalog, schemes: ["Example"], destinations: [[old]])
+        let unexpectedRefresh = expectation(description: "Opening the menu must not refresh destinations")
+        unexpectedRefresh.isInverted = true
         let resolver = XcodeSchemeResolver { _ in
-            Data("{ platform:iOS Simulator, id:new, name:New iPhone }".utf8)
+            unexpectedRefresh.fulfill()
+            return Data("{ platform:iOS Simulator, id:new, name:New iPhone }".utf8)
         }
         let controller = StatusBarController(
             projectCatalog: catalog,
@@ -1395,6 +1400,24 @@ final class StatusBarControllerTests: XCTestCase {
         )
         let menu = controller.contextMenu
         (controller as NSMenuDelegate).menuWillOpen?(menu)
+        await fulfillment(of: [unexpectedRefresh], timeout: 0.2)
+        XCTAssertEqual(
+            catalog.selectedProject?.selectedLaunchConfiguration?.availableDestinations,
+            [old]
+        )
+
+        let projectHeader = try XCTUnwrap(menu.items.first { $0.title == "Example" })
+        let refreshButton = try XCTUnwrap(
+            projectHeader.view?.subviews.compactMap { $0 as? NSButton }.first {
+                $0.identifier?.rawValue == "refresh-selected-project"
+            }
+        )
+        XCTAssertEqual(refreshButton.accessibilityLabel(), "Refresh Example")
+        let headerView = try XCTUnwrap(projectHeader.view)
+        headerView.frame.size.width = 320
+        headerView.layoutSubtreeIfNeeded()
+        XCTAssertEqual(refreshButton.frame.maxX, headerView.bounds.maxX - 8, accuracy: 0.5)
+        refreshButton.performClick(nil)
         let refreshed = expectation(for: NSPredicate { _, _ in
             catalog.selectedProject?.selectedLaunchConfiguration?
                 .availableDestinations.map(\.id) == ["new"]
@@ -1415,6 +1438,40 @@ final class StatusBarControllerTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(descendants(of: runRow).compactMap { $0 as? NSButton }.first {
             $0.identifier?.rawValue == "run-project-button"
         }).isEnabled)
+    }
+
+    @MainActor
+    func testCatalogChangeRefreshesAProjectSelectedInTheEditor() async throws {
+        let suiteName = "StatusBarControllerTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let catalog = ProjectCatalog(defaults: defaults, storageKey: "projects")
+        let old = XcodeDestination(platform: .macOS, id: "old", name: "Old Mac")
+        configure(catalog, schemes: ["Example"], destinations: [[old]])
+        let controller = StatusBarController(
+            projectCatalog: catalog,
+            appSettings: AppSettings(defaults: defaults),
+            schemeResolver: XcodeSchemeResolver { _ in
+                Data("{ platform:macOS, id:new, name:New Mac }".utf8)
+            },
+            workingCopyResolver: NoGitWorkingCopyResolver()
+        )
+
+        XCTAssertTrue(catalog.add(
+            URL(fileURLWithPath: "/Projects/Other.xcodeproj"),
+            schemes: ["Other"]
+        ))
+        catalog.setSchemeEnabled(true, scheme: "Other", forProjectAt: 1)
+        catalog.updateDestinations([old], scheme: "Other", forProjectAt: 1)
+        controller.projectCatalogDidChange()
+
+        let refreshed = expectation(for: NSPredicate { _, _ in
+            catalog.selectedProject?.selectedLaunchConfiguration?
+                .availableDestinations.map(\.id) == ["new"]
+        }, evaluatedWith: nil)
+        await fulfillment(of: [refreshed], timeout: 2)
+        XCTAssertEqual(controller.contextMenu.items.first?.title, "Other")
+        XCTAssertFalse(controller.contextMenu.items.contains { $0.title == "Loading branches…" })
     }
 
     @MainActor
@@ -1441,12 +1498,12 @@ final class StatusBarControllerTests: XCTestCase {
         controller.perform(.startProject)
         XCTAssertEqual(launches, 0)
         XCTAssertEqual(catalog.selectedProject?.selectedLaunchConfiguration?.selectedDestination, old)
-        XCTAssertTrue(controller.contextMenu.items.contains { $0.title.contains("Reopen menu to retry") })
+        XCTAssertTrue(controller.contextMenu.items.contains { $0.title.contains("Use Refresh to retry") })
 
         await controller.refreshDestinations()
         controller.perform(.startProject)
         XCTAssertEqual(launches, 1)
-        XCTAssertFalse(controller.contextMenu.items.contains { $0.title.contains("Reopen menu to retry") })
+        XCTAssertFalse(controller.contextMenu.items.contains { $0.title.contains("Use Refresh to retry") })
     }
 
     @MainActor
@@ -1561,6 +1618,18 @@ final class StatusBarControllerTests: XCTestCase {
 
 private enum TestLaunchError: Error {
     case failed
+}
+
+private struct NoGitWorkingCopyResolver: GitWorkingCopyResolving {
+    func discover(containerURL: URL) throws -> GitRepositoryState? { nil }
+
+    func prepare(
+        _ copy: GitWorkingCopy,
+        for containerURL: URL,
+        worktreesDirectory: URL
+    ) throws -> URL {
+        throw GitWorkingCopyResolver.ResolverError.staleSelection
+    }
 }
 
 private final class RecordingProjectLauncher: ProjectLaunching, @unchecked Sendable {

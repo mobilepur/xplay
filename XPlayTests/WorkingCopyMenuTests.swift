@@ -111,6 +111,51 @@ final class WorkingCopyMenuTests: XCTestCase {
         XCTAssertEqual(menu.index(of: current) + 1, menu.index(of: menu.items.first { $0.title == "Run Project" }!))
     }
 
+    func testProjectHeaderRefreshUpdatesCachedBranches() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let initial = GitRepositoryState(
+            rootURL: fixture.directory,
+            workingCopies: [fixture.copies[4]]
+        )
+        let updated = GitRepositoryState(
+            rootURL: fixture.directory,
+            workingCopies: [fixture.copies[0], fixture.copies[4]]
+        )
+        let resolver = MutableMenuResolver(state: initial)
+        let controller = StatusBarController(
+            projectCatalog: fixture.catalog,
+            appSettings: AppSettings(defaults: fixture.defaults),
+            schemeResolver: XcodeSchemeResolver { _ in
+                Data("{ platform:macOS, id:mac, name:My Mac }".utf8)
+            },
+            workingCopyResolver: resolver
+        )
+        await controller.refreshWorkingCopies()
+        XCTAssertEqual(
+            controller.contextMenu.items.filter { $0.identifier?.rawValue == "working-copy" }.map(\.title),
+            ["main"]
+        )
+
+        resolver.setState(updated)
+        let header = try XCTUnwrap(controller.contextMenu.items.first { $0.title == "Example" })
+        let refreshButton = try XCTUnwrap(
+            header.view?.subviews.compactMap { $0 as? NSButton }.first {
+                $0.identifier?.rawValue == "refresh-selected-project"
+            }
+        )
+        refreshButton.performClick(nil)
+
+        let refreshed = expectation(for: NSPredicate { _, _ in
+            MainActor.assumeIsolated {
+                controller.contextMenu.items.filter {
+                    $0.identifier?.rawValue == "working-copy"
+                }.map(\.title) == ["feature-0", "main"]
+            }
+        }, evaluatedWith: nil)
+        await fulfillment(of: [refreshed], timeout: 3)
+    }
+
     func testSelectingOverflowWorktreeRoutesRunOpenAndDiscoveryToSameContainer() async throws {
         let fixture = try Fixture()
         defer { fixture.remove() }
@@ -210,7 +255,7 @@ final class WorkingCopyMenuTests: XCTestCase {
         resolver.setFailure(true)
         await controller.refreshWorkingCopies()
         XCTAssertNotNil(controller.contextMenu.items.first {
-            $0.title == "Could not read branches. Reopen menu to retry."
+            $0.title == "Could not read branches. Use Refresh to retry."
         })
         XCTAssertEqual(controller.contextMenu.items.first {
             $0.identifier?.rawValue == "current-branch"
@@ -218,7 +263,7 @@ final class WorkingCopyMenuTests: XCTestCase {
         resolver.setFailure(false)
         await controller.refreshWorkingCopies()
         XCTAssertNil(controller.contextMenu.items.first {
-            $0.title == "Could not read branches. Reopen menu to retry."
+            $0.title == "Could not read branches. Use Refresh to retry."
         })
         XCTAssertEqual(controller.contextMenu.items.first {
             $0.identifier?.rawValue == "current-branch"
@@ -377,6 +422,35 @@ private struct MenuTestResolver: GitWorkingCopyResolving {
     let state: GitRepositoryState?
     func discover(containerURL: URL) throws -> GitRepositoryState? { state }
     func prepare(_ copy: GitWorkingCopy, for containerURL: URL, worktreesDirectory: URL) throws -> URL {
+        try XCTUnwrap(copy.containerURL)
+    }
+}
+
+private final class MutableMenuResolver: GitWorkingCopyResolving, @unchecked Sendable {
+    private let lock = NSLock()
+    private var state: GitRepositoryState?
+
+    init(state: GitRepositoryState?) {
+        self.state = state
+    }
+
+    func setState(_ state: GitRepositoryState?) {
+        lock.lock()
+        defer { lock.unlock() }
+        self.state = state
+    }
+
+    func discover(containerURL: URL) throws -> GitRepositoryState? {
+        lock.lock()
+        defer { lock.unlock() }
+        return state
+    }
+
+    func prepare(
+        _ copy: GitWorkingCopy,
+        for containerURL: URL,
+        worktreesDirectory: URL
+    ) throws -> URL {
         try XCTUnwrap(copy.containerURL)
     }
 }
