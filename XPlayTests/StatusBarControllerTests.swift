@@ -41,17 +41,9 @@ final class StatusBarControllerTests: XCTestCase {
         try withState { catalog, settings in
             let phone = XcodeDestination(platform: .iOSSimulator, id: "phone", name: "iPhone 17 Pro")
             configure(catalog, schemes: ["Example-iOS"], destinations: [[phone]])
+            settings.setMenuBarContent(.nameAndTarget)
             let controller = StatusBarController(projectCatalog: catalog, appSettings: settings)
             let button = try XCTUnwrap(controller.statusItem.button)
-            let views = descendants(of: button)
-            let logo = try XCTUnwrap(views.first { $0.identifier?.rawValue == "xplay-status-icon" })
-            let device = try XCTUnwrap(views.first { $0.identifier?.rawValue == "destination-status-icon" })
-            let name = try XCTUnwrap(views.compactMap { $0 as? NSTextField }.first {
-                $0.identifier?.rawValue == "status-project-name"
-            })
-            XCTAssertFalse(logo.isHiddenOrHasHiddenAncestor)
-            XCTAssertTrue(device.isHiddenOrHasHiddenAncestor)
-            XCTAssertTrue(name.isHiddenOrHasHiddenAncestor)
 
             for (index, mode) in AppSettings.MenuBarContent.allCases.enumerated() {
                 let submenu = try XCTUnwrap(controller.contextMenu.items.first {
@@ -60,10 +52,24 @@ final class StatusBarControllerTests: XCTestCase {
                 XCTAssertEqual(submenu.items.map(\.title), ["XPlay", "Name + Target", "Name", "Target"])
                 submenu.performActionForItem(at: index)
                 XCTAssertEqual(settings.menuBarContent, mode)
-                XCTAssertEqual(logo.isHiddenOrHasHiddenAncestor, mode != .xplay)
-                XCTAssertEqual(device.isHiddenOrHasHiddenAncestor, mode == .xplay || mode == .name)
-                XCTAssertEqual(name.isHiddenOrHasHiddenAncestor, mode == .xplay || mode == .target)
-                XCTAssertEqual(name.stringValue, "Example")
+
+                let views = descendants(of: button)
+                if mode == .xplay {
+                    XCTAssertEqual(button.image?.name(), NSImage.Name("XPlayIcon"))
+                    XCTAssertFalse(views.contains { $0.identifier?.rawValue == "status-content" })
+                } else {
+                    XCTAssertNil(button.image)
+                    let logo = try XCTUnwrap(views.first { $0.identifier?.rawValue == "xplay-status-icon" })
+                    let device = try XCTUnwrap(views.first { $0.identifier?.rawValue == "destination-status-icon" })
+                    let name = try XCTUnwrap(views.compactMap { $0 as? NSTextField }.first {
+                        $0.identifier?.rawValue == "status-project-name"
+                    })
+                    XCTAssertTrue(logo.isHiddenOrHasHiddenAncestor)
+                    XCTAssertEqual(device.isHiddenOrHasHiddenAncestor, mode == .name)
+                    XCTAssertEqual(name.isHiddenOrHasHiddenAncestor, mode == .target)
+                    XCTAssertEqual(name.stringValue, "Example")
+                }
+
                 let updated = try XCTUnwrap(controller.contextMenu.items.first {
                     $0.title == "Menu Bar Icon"
                 }?.submenu)
@@ -72,8 +78,34 @@ final class StatusBarControllerTests: XCTestCase {
 
             catalog.setSchemeEnabled(false, scheme: "Example-iOS", forProjectAt: 0)
             controller.refreshConfiguration()
+            let views = descendants(of: button)
+            let logo = try XCTUnwrap(views.first { $0.identifier?.rawValue == "xplay-status-icon" })
+            let device = try XCTUnwrap(views.first { $0.identifier?.rawValue == "destination-status-icon" })
             XCTAssertFalse(logo.isHiddenOrHasHiddenAncestor)
             XCTAssertTrue(device.isHiddenOrHasHiddenAncestor)
+        }
+    }
+
+    @MainActor
+    func testIdleXPlayDisplayUsesNativeStatusItemImage() throws {
+        try withState { catalog, settings in
+            let controller = StatusBarController(projectCatalog: catalog, appSettings: settings)
+            let button = try XCTUnwrap(controller.statusItem.button)
+
+            XCTAssertEqual(button.image?.name(), NSImage.Name("XPlayIcon"))
+            XCTAssertFalse(descendants(of: button).contains {
+                $0.identifier?.rawValue == "status-content"
+            })
+
+            let submenu = try XCTUnwrap(controller.contextMenu.items.first {
+                $0.title == "Menu Bar Icon"
+            }?.submenu)
+            submenu.performActionForItem(at: 1)
+
+            XCTAssertNil(button.image)
+            XCTAssertTrue(descendants(of: button).contains {
+                $0.identifier?.rawValue == "status-content"
+            })
         }
     }
 
@@ -224,6 +256,20 @@ final class StatusBarControllerTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(row.frame.height, 48)
             let open = try XCTUnwrap(buttons.first { $0.identifier?.rawValue == "open-project-button" })
             let openRect = open.alignmentRect(forFrame: open.frame)
+            XCTAssertEqual(play.frame.width, open.frame.width, accuracy: 0.5)
+            XCTAssertEqual(
+                try XCTUnwrap(play.cell).drawingRect(forBounds: play.bounds).width,
+                try XCTUnwrap(open.cell).drawingRect(forBounds: open.bounds).width,
+                accuracy: 0.5
+            )
+            let playCell = try XCTUnwrap(play.cell as? MenuRunButtonCell)
+            let playBezel = playCell.bezelRect(forFrame: play.bounds)
+            let openBezel = try XCTUnwrap(open.cell).drawingRect(forBounds: open.bounds)
+            XCTAssertEqual(playBezel.minX, play.bounds.minX + 6, accuracy: 0.5)
+            XCTAssertEqual(playBezel.maxX, play.bounds.maxX - 6, accuracy: 0.5)
+            XCTAssertEqual(playBezel.minY, openBezel.minY, accuracy: 0.5)
+            XCTAssertEqual(playBezel.height, openBezel.height, accuracy: 0.5)
+            XCTAssertEqual(playCell.bezelCornerRadius(for: playBezel), 6, accuracy: 0.5)
             XCTAssertEqual(openRect.minX - playAlignmentRect.maxX, 8, accuracy: 0.5)
             XCTAssertEqual(stopAlignmentRect.minX - openRect.maxX, 8, accuracy: 0.5)
             XCTAssertGreaterThanOrEqual(playAlignmentRect.width, play.intrinsicContentSize.width)

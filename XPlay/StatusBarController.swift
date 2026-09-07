@@ -96,7 +96,7 @@ final class MenuTintedSwitch: NSControl {
 }
 
 @MainActor
-private final class MenuRunButtonCell: NSButtonCell {
+final class MenuRunButtonCell: NSButtonCell {
     override var interiorBackgroundStyle: NSView.BackgroundStyle {
         isEnabled ? .emphasized : super.interiorBackgroundStyle
     }
@@ -106,14 +106,24 @@ private final class MenuRunButtonCell: NSButtonCell {
             super.drawBezel(withFrame: frame, in: controlView)
             return
         }
-        let content = drawingRect(forBounds: frame)
-        let bezel = NSRect(x: frame.minX, y: content.minY, width: frame.width, height: content.height)
-        let radius: CGFloat
-        if #available(macOS 26.0, *) { radius = bezel.height / 2 } else { radius = 6 }
+        let bezel = bezelRect(forFrame: frame)
+        let radius = bezelCornerRadius(for: bezel)
         let color = isHighlighted ? NSColor.systemBlue.blended(withFraction: 0.18, of: .black)! : .systemBlue
         color.setFill()
         NSBezierPath(roundedRect: bezel, xRadius: radius, yRadius: radius).fill()
     }
+
+    func bezelRect(forFrame frame: NSRect) -> NSRect {
+        let contentRect = drawingRect(forBounds: frame)
+        return NSRect(
+            x: frame.minX + 6,
+            y: contentRect.minY,
+            width: max(0, frame.width - 12),
+            height: contentRect.height
+        )
+    }
+
+    func bezelCornerRadius(for _: NSRect) -> CGFloat { 6 }
 
     override func drawTitle(_ title: NSAttributedString, withFrame frame: NSRect, in controlView: NSView) -> NSRect {
         guard isEnabled else { return super.drawTitle(title, withFrame: frame, in: controlView) }
@@ -657,6 +667,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     private(set) var statusItem: NSStatusItem
     private let statusItemView: StatusItemView
+    private var statusItemViewConstraints: [NSLayoutConstraint] = []
     private let projectCatalog: ProjectCatalog?
     private var observedSelectedProjectURL: URL?
     private let schemeResolver: XcodeSchemeResolver
@@ -1490,13 +1501,6 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         button.action = #selector(handleStatusItemClick)
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
 
-        button.addSubview(statusItemView)
-
-        NSLayoutConstraint.activate([
-            statusItemView.centerXAnchor.constraint(equalTo: button.centerXAnchor),
-            statusItemView.centerYAnchor.constraint(equalTo: button.centerYAnchor),
-        ])
-
         refreshConfiguration()
     }
 
@@ -1848,6 +1852,22 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         }
     }
 
+    private func installStatusItemView(in button: NSButton) {
+        guard statusItemView.superview !== button else { return }
+        button.addSubview(statusItemView)
+        statusItemViewConstraints = [
+            statusItemView.centerXAnchor.constraint(equalTo: button.centerXAnchor),
+            statusItemView.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+        ]
+        NSLayoutConstraint.activate(statusItemViewConstraints)
+    }
+
+    private func removeStatusItemView() {
+        NSLayoutConstraint.deactivate(statusItemViewConstraints)
+        statusItemViewConstraints.removeAll()
+        statusItemView.removeFromSuperview()
+    }
+
     func refreshConfiguration() {
         guard let button = statusItem.button else { return }
         let project = projectCatalog?.selectedProject
@@ -1869,16 +1889,26 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         } else {
             description = "No project scheme selected"
         }
-        button.image = nil
-        statusItemView.iconImageView.image = menuBarImage(description: "XPlay")
-        statusItemView.configure(
-            content: appSettings.menuBarContent,
-            projectName: activeLaunchPlan?.productName ?? project?.name,
-            destination: destination
-        )
-        statusItem.length = statusItemView.showsOnlyLogo
-            ? NSStatusItem.squareLength
-            : max(NSStatusBar.system.thickness, statusItemView.fittingSize.width + 8)
+        let usesNativeImage = appSettings.menuBarContent == .xplay && !isRunning
+        if usesNativeImage {
+            removeStatusItemView()
+            button.image = menuBarImage(description: "XPlay")
+            button.imagePosition = .imageOnly
+            button.imageScaling = .scaleProportionallyDown
+            statusItem.length = NSStatusItem.squareLength
+        } else {
+            button.image = nil
+            installStatusItemView(in: button)
+            statusItemView.iconImageView.image = menuBarImage(description: "XPlay")
+            statusItemView.configure(
+                content: appSettings.menuBarContent,
+                projectName: activeLaunchPlan?.productName ?? project?.name,
+                destination: destination
+            )
+            statusItem.length = statusItemView.showsOnlyLogo
+                ? NSStatusItem.squareLength
+                : max(NSStatusBar.system.thickness, statusItemView.fittingSize.width + 8)
+        }
         let menuHint = appSettings.leftClickAction == .menu ? "Left-click for menu" : "Right-click for menu"
         if appSettings.leftClickAction == .menu {
             button.setAccessibilityLabel("Open XPlay menu")
