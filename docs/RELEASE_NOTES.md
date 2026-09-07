@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 1.1.3 — 2026-09-07
+
+### Fixed
+
+- Keep the XPlay menu bar icon responsive and visible by using AppKit’s native
+  status item image while idle.
+- Match the visual width and corner radius of the Run and Open buttons while
+  keeping Stop compact.
+
 ## 1.1.2 — 2026-09-07
 
 ### Added
