@@ -1450,10 +1450,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         onEditProjects: (() -> Void)? = nil,
         onCatalogChange: (() -> Void)? = nil,
         confirmMacroAcceptance: (() -> Bool)? = nil,
-        cacheDirectory: URL = FileManager.default.urls(
-            for: .cachesDirectory,
-            in: .userDomainMask
-        )[0].appendingPathComponent("XPlay", isDirectory: true),
+        cacheDirectory: URL = BuildCache.defaultDirectory,
         makeLauncher: @escaping (XcodeProjectLaunchPlan) -> any ProjectLaunching = {
             XcodeProjectLauncher(plan: $0)
         },

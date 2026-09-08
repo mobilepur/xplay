@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 1.1.5 — 2026-09-08
+
+### Added
+
+- Automatically remove build caches and logs unused for seven days.
+- Keep build caches near 5 GB by removing the least recently used entries while
+  protecting active builds, running apps, and the most recently used cache.
+
 ## 1.1.4 — 2026-09-07
 
 ### Changed

@@ -35,6 +35,21 @@ branch manually; the current selection is retained. If the newest branch cannot
 provide this Xcode project, XPlay reports the error instead of launching an
 older branch silently.
 
+## Automatic build cache cleanup
+
+After each Run finishes, fails, or is cancelled, XPlay cleans its disposable data
+under `~/Library/Caches/XPlay` in the background. Build caches and logs unused for
+seven days are removed. If build caches still exceed approximately 5 GB, the least
+recently used caches are removed first.
+
+Cleanup waits until all XPlay builds and launches have finished. Caches containing
+running macOS apps are preserved, and the most recently used cache is kept when
+enforcing the size target. These protections can temporarily leave more than 5 GB.
+Older cache layouts are included. Removing caches makes the next affected build
+slower and may require downloading dependencies again.
+
+Project sources, saved settings, and Git worktrees are not part of this cleanup.
+
 ## Install
 
 Requires macOS 15 or later, Xcode, and [Homebrew](https://brew.sh).
