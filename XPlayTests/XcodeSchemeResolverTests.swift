@@ -120,4 +120,56 @@ final class XcodeSchemeResolverTests: XCTestCase {
         XCTAssertGreaterThan(result.output.count, 65_536)
         XCTAssertGreaterThan(result.diagnostic.count, 65_536)
     }
+
+    func testProcessRunnerTerminatesACommandThatExceedsItsTimeout() throws {
+        let started = Date()
+
+        XCTAssertThrowsError(
+            try XcodeSchemeResolver.runProcess(
+                executableURL: URL(fileURLWithPath: "/bin/sleep"),
+                arguments: ["5"],
+                timeout: 0.1
+            )
+        ) { error in
+            guard case let XcodeSchemeResolver.ResolverError.timedOut(seconds) = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+            XCTAssertEqual(seconds, 0.1)
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 1)
+    }
+
+    func testProcessRunnerTimeoutIsNotHeldOpenByAChildProcessOutputPipe() throws {
+        let started = Date()
+
+        XCTAssertThrowsError(
+            try XcodeSchemeResolver.runProcess(
+                executableURL: URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", "sleep 5 & wait"],
+                timeout: 0.1
+            )
+        ) { error in
+            guard case XcodeSchemeResolver.ResolverError.timedOut = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 1)
+    }
+
+    func testProcessRunnerKillsACommandThatIgnoresTermination() throws {
+        let started = Date()
+
+        XCTAssertThrowsError(
+            try XcodeSchemeResolver.runProcess(
+                executableURL: URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", "trap '' TERM; while :; do sleep 5; done"],
+                timeout: 0.2
+            )
+        ) { error in
+            guard case XcodeSchemeResolver.ResolverError.timedOut = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 1)
+    }
 }

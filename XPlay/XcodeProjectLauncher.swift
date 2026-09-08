@@ -91,7 +91,12 @@ final class XcodeProjectLauncher: ProjectLaunching, @unchecked Sendable {
     init(
         plan: XcodeProjectLaunchPlan,
         runCommand: @escaping CommandRunner,
-        runCapturedCommand: @escaping CapturedCommandRunner = XcodeSchemeResolver.runProcess,
+        runCapturedCommand: @escaping CapturedCommandRunner = { executableURL, arguments in
+            try XcodeSchemeResolver.runProcess(
+                executableURL: executableURL,
+                arguments: arguments
+            )
+        },
         cancelCommand: @escaping CommandCanceller = {},
         openMacApplication: @escaping MacApplicationOpener,
         resolveBuiltProduct: BuiltProductResolver? = nil,

@@ -10,6 +10,11 @@
 - Keep build caches near 5 GB by removing the least recently used entries while
   protecting active builds, running apps, and the most recently used cache.
 
+### Fixed
+
+- Stop scheme discovery from remaining on Loading schemes indefinitely when
+  Xcode package resolution stalls.
+
 ## 1.1.4 — 2026-09-07
 
 ### Changed
