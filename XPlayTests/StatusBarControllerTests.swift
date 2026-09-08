@@ -1425,7 +1425,7 @@ final class StatusBarControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testStatusProjectSelectionSynchronizesOpenEditorAndActionsTargetVisibleProject() async throws {
+    func testStatusProjectSelectionKeepsMenuOpenSynchronizesEditorAndTargetsVisibleProject() async throws {
         let suiteName = "StatusBarControllerTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -1452,8 +1452,9 @@ final class StatusBarControllerTests: XCTestCase {
             appSettings: AppSettings(defaults: defaults, storageKey: "settings"),
             onCatalogChange: { editor.refreshFromCatalog() }
         )
+        let openMenu = controller.contextMenu
         let secondProjectItem = try XCTUnwrap(
-            controller.contextMenu.items.first {
+            openMenu.items.first {
                 $0.title == "Second" && $0.action != nil
             }
         )
@@ -1461,7 +1462,8 @@ final class StatusBarControllerTests: XCTestCase {
             $0.identifier?.rawValue == "project-selection-button"
         })
         projectButton.performClick(nil)
-        XCTAssertEqual(controller.contextMenu.items.filter {
+        XCTAssertTrue(controller.contextMenu === openMenu)
+        XCTAssertEqual(openMenu.items.filter {
             $0.view?.subviews.contains { $0.identifier?.rawValue == "project-selection-button" } == true
         }.map(\.state), [.off, .on])
 

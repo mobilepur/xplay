@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.1.6 — 2026-09-08
+
+### Fixed
+
+- Keep the XPlay menu open when selecting another project and update its visible
+  project state in place.
+
 ## 1.1.5 — 2026-09-08
 
 ### Added
