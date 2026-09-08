@@ -68,6 +68,7 @@ final class XcodeProjectLauncher: ProjectLaunching, @unchecked Sendable {
     private let cancelCommand: CommandCanceller
     private let openMacApplication: MacApplicationOpener
     private let resolveBuiltProduct: BuiltProductResolver
+    private let buildCache: BuildCache?
     private let stateLock = NSLock()
     private var isCancelled = false
 
@@ -82,22 +83,30 @@ final class XcodeProjectLauncher: ProjectLaunching, @unchecked Sendable {
             runCommand: commandRunner.run,
             runCapturedCommand: commandRunner.capture,
             cancelCommand: commandRunner.cancel,
-            openMacApplication: Self.openApplication
+            openMacApplication: Self.openApplication,
+            buildCache: .shared
         )
     }
 
     init(
         plan: XcodeProjectLaunchPlan,
         runCommand: @escaping CommandRunner,
-        runCapturedCommand: @escaping CapturedCommandRunner = XcodeSchemeResolver.runProcess,
+        runCapturedCommand: @escaping CapturedCommandRunner = { executableURL, arguments in
+            try XcodeSchemeResolver.runProcess(
+                executableURL: executableURL,
+                arguments: arguments
+            )
+        },
         cancelCommand: @escaping CommandCanceller = {},
         openMacApplication: @escaping MacApplicationOpener,
-        resolveBuiltProduct: BuiltProductResolver? = nil
+        resolveBuiltProduct: BuiltProductResolver? = nil,
+        buildCache: BuildCache? = nil
     ) {
         self.plan = plan
         self.runCommand = runCommand
         self.cancelCommand = cancelCommand
         self.openMacApplication = openMacApplication
+        self.buildCache = buildCache
         self.resolveBuiltProduct = resolveBuiltProduct ?? { plan in
             try Self.resolveBuiltProduct(
                 plan: plan,
@@ -110,20 +119,33 @@ final class XcodeProjectLauncher: ProjectLaunching, @unchecked Sendable {
         DispatchQueue.global(qos: .userInitiated).async { [self] in
             do {
                 try throwIfCancelled()
-                let appURL = try build()
-                try throwIfCancelled()
-                switch plan.destination.platform {
-                case .macOS:
-                    DispatchQueue.main.async { [self] in
-                        restartMacApplication(at: appURL, completion: completion)
-                    }
-                case .iOSSimulator:
-                    try launchOnSimulator(appURL)
-                    completion(.success(appURL))
+                let lease = try buildCache?.beginUsing(plan.derivedDataURL)
+                performLaunch { result in
+                    lease?.finish()
+                    completion(result)
                 }
             } catch {
                 completion(.failure(error))
             }
+        }
+    }
+
+    private func performLaunch(completion: @escaping @Sendable (Result<URL, Error>) -> Void) {
+        do {
+            try throwIfCancelled()
+            let appURL = try build()
+            try throwIfCancelled()
+            switch plan.destination.platform {
+            case .macOS:
+                DispatchQueue.main.async { [self] in
+                    restartMacApplication(at: appURL, completion: completion)
+                }
+            case .iOSSimulator:
+                try launchOnSimulator(appURL)
+                completion(.success(appURL))
+            }
+        } catch {
+            completion(.failure(error))
         }
     }
 

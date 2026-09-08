@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 final class XcodeSchemeResolver: @unchecked Sendable {
@@ -7,18 +8,17 @@ final class XcodeSchemeResolver: @unchecked Sendable {
         let diagnostic: Data
     }
 
-    private final class DataBox: @unchecked Sendable {
-        var data = Data()
-    }
-
     enum ResolverError: LocalizedError {
         case xcodebuildFailed(status: Int32, message: String)
+        case timedOut(seconds: TimeInterval)
 
         var errorDescription: String? {
             switch self {
             case let .xcodebuildFailed(status, message):
                 let detail = message.isEmpty ? "No diagnostic output was produced." : message
                 return "Could not read project schemes (xcodebuild status \(status)). \(detail)"
+            case let .timedOut(seconds):
+                return "Xcode did not finish reading the project within \(Int(seconds)) seconds."
             }
         }
     }
@@ -157,7 +157,8 @@ final class XcodeSchemeResolver: @unchecked Sendable {
     private static func runXcodebuild(arguments: [String]) throws -> Data {
         let result = try runProcess(
             executableURL: URL(fileURLWithPath: "/usr/bin/xcodebuild"),
-            arguments: arguments
+            arguments: arguments,
+            timeout: 30
         )
 
         guard result.status == 0 else {
@@ -172,37 +173,55 @@ final class XcodeSchemeResolver: @unchecked Sendable {
 
     static func runProcess(
         executableURL: URL,
-        arguments: [String]
+        arguments: [String],
+        timeout: TimeInterval? = nil
     ) throws -> ProcessResult {
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
+        let fileManager = FileManager.default
+        let captureDirectory = fileManager.temporaryDirectory
+            .appendingPathComponent("XPlay-Command-\(UUID().uuidString)", isDirectory: true)
+        try fileManager.createDirectory(at: captureDirectory, withIntermediateDirectories: false)
+        defer { try? fileManager.removeItem(at: captureDirectory) }
+
+        let outputURL = captureDirectory.appendingPathComponent("stdout")
+        let diagnosticURL = captureDirectory.appendingPathComponent("stderr")
+        try Data().write(to: outputURL)
+        try Data().write(to: diagnosticURL)
+        let outputHandle = try FileHandle(forWritingTo: outputURL)
+        let diagnosticHandle = try FileHandle(forWritingTo: diagnosticURL)
+        defer {
+            try? outputHandle.close()
+            try? diagnosticHandle.close()
+        }
+
         let process = Process()
         process.executableURL = executableURL
         process.arguments = arguments
-        process.standardOutput = outputPipe
-        process.standardError = errorPipe
+        process.standardOutput = outputHandle
+        process.standardError = diagnosticHandle
 
+        let termination = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in termination.signal() }
         try process.run()
-        let output = DataBox()
-        let diagnostic = DataBox()
-        let readers = DispatchGroup()
-        readers.enter()
-        DispatchQueue.global(qos: .userInitiated).async {
-            output.data = outputPipe.fileHandleForReading.readDataToEndOfFile()
-            readers.leave()
+        if let timeout {
+            if termination.wait(timeout: .now() + timeout) == .timedOut {
+                process.terminate()
+                if termination.wait(timeout: .now() + 0.25) == .timedOut {
+                    kill(process.processIdentifier, SIGKILL)
+                    _ = termination.wait(timeout: .now() + 0.25)
+                }
+                throw ResolverError.timedOut(seconds: timeout)
+            }
+        } else {
+            termination.wait()
         }
-        readers.enter()
-        DispatchQueue.global(qos: .userInitiated).async {
-            diagnostic.data = errorPipe.fileHandleForReading.readDataToEndOfFile()
-            readers.leave()
-        }
-        process.waitUntilExit()
-        readers.wait()
+
+        try outputHandle.close()
+        try diagnosticHandle.close()
 
         return ProcessResult(
             status: process.terminationStatus,
-            output: output.data,
-            diagnostic: diagnostic.data
+            output: try Data(contentsOf: outputURL),
+            diagnostic: try Data(contentsOf: diagnosticURL)
         )
     }
 }
