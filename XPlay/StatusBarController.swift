@@ -1740,7 +1740,6 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func selectProjectButton(_ button: NSButton) {
-        contextMenu.cancelTracking()
         selectProject(at: button.tag)
     }
 
@@ -1748,7 +1747,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         projectCatalog?.selectProject(at: index)
         observedSelectedProjectURL = projectCatalog?.selectedProject?.url
         onCatalogChange?()
-        contextMenu = makeContextMenu()
+        rebuildContextMenu()
         refreshConfiguration()
         Task { [weak self] in
             await self?.refreshWorkingCopies()
