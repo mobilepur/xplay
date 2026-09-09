@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 import SwiftUI
 
 @MainActor
@@ -678,6 +679,10 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private let onEditProjects: (() -> Void)?
     private let onCatalogChange: (() -> Void)?
     private let confirmMacroAcceptance: () -> Bool
+    private let loginItemStatus: @MainActor () -> SMAppService.Status
+    private let setLoginItemEnabled: @MainActor (Bool) throws -> Void
+    private let openLoginItemSettings: @MainActor () -> Void
+    private let presentLoginItemError: @MainActor (Error) -> Void
     private let cacheDirectory: URL
     private let makeLauncher: (XcodeProjectLaunchPlan) -> any ProjectLaunching
     private let presentLaunchFailures: ([LaunchFailure]) -> Void
@@ -817,6 +822,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             help: "Use the branch with the most recent activity. Turn off to choose a branch manually."
         ))
         menu.addItem(makeMacroAcceptanceItem())
+        menu.addItem(makeStartAtLoginItem())
         menu.addItem(.separator())
 
         menu.addItem(makeSectionHeaderItem(title: "About"))
@@ -835,6 +841,10 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         if menu !== contextMenu {
             trackedSubmenus.insert(ObjectIdentifier(menu))
+        } else if let toggle = menu.items.first(where: {
+            $0.identifier?.rawValue == "start-at-login"
+        })?.view?.subviews.compactMap({ $0 as? MenuTintedSwitch }).first {
+            refreshLoginItemToggle(toggle)
         }
     }
 
@@ -1406,6 +1416,52 @@ final class StatusBarController: NSObject, NSMenuDelegate {
                        action: #selector(setMacroAcceptance(_:)), help: Self.macroWarningText)
     }
 
+    private func makeStartAtLoginItem() -> NSMenuItem {
+        let item = makeToggleItem(title: "Start at Login", isOn: false,
+                                  action: #selector(setStartAtLogin(_:)), help: "")
+        item.identifier = NSUserInterfaceItemIdentifier("start-at-login")
+        if let toggle = item.view?.subviews.compactMap({ $0 as? MenuTintedSwitch }).first {
+            refreshLoginItemToggle(toggle)
+        }
+        return item
+    }
+
+    private func refreshLoginItemToggle(_ toggle: MenuTintedSwitch) {
+        let status = loginItemStatus()
+        toggle.state = status == .enabled ? .on : .off
+        toggle.toolTip = status == .requiresApproval
+            ? "Allow XPlay in System Settings → General → Login Items."
+            : "Open XPlay automatically when you log in to your Mac."
+    }
+
+    @objc private func setStartAtLogin(_ toggle: MenuTintedSwitch) {
+        let enabled = toggle.state == .on
+        var failure: Error?
+        do {
+            if !(enabled && loginItemStatus() == .requiresApproval) {
+                try setLoginItemEnabled(enabled)
+            }
+        } catch {
+            failure = error
+        }
+        refreshLoginItemToggle(toggle)
+        if enabled && loginItemStatus() == .requiresApproval {
+            contextMenu.cancelTracking()
+            openLoginItemSettings()
+        } else if let failure {
+            contextMenu.cancelTracking()
+            presentLoginItemError(failure)
+        }
+    }
+
+    private static func presentDefaultLoginItemError(_ error: Error) {
+        let alert = NSAlert()
+        alert.messageText = "Could not change Start at Login"
+        alert.informativeText = error.localizedDescription
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+
     private func makeToggleItem(title: String, isOn: Bool, action: Selector, help: String) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         item.isEnabled = true
@@ -1450,6 +1506,16 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         onEditProjects: (() -> Void)? = nil,
         onCatalogChange: (() -> Void)? = nil,
         confirmMacroAcceptance: (() -> Bool)? = nil,
+        loginItemStatus: @escaping @MainActor () -> SMAppService.Status = { SMAppService.mainApp.status },
+        setLoginItemEnabled: @escaping @MainActor (Bool) throws -> Void = { enabled in
+            if enabled {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+        },
+        openLoginItemSettings: @escaping @MainActor () -> Void = { SMAppService.openSystemSettingsLoginItems() },
+        presentLoginItemError: (@MainActor (Error) -> Void)? = nil,
         cacheDirectory: URL = BuildCache.defaultDirectory,
         makeLauncher: @escaping (XcodeProjectLaunchPlan) -> any ProjectLaunching = {
             XcodeProjectLauncher(plan: $0)
@@ -1492,6 +1558,10 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         self.onEditProjects = onEditProjects
         self.onCatalogChange = onCatalogChange
         self.confirmMacroAcceptance = confirmMacroAcceptance ?? Self.presentMacroWarning
+        self.loginItemStatus = loginItemStatus
+        self.setLoginItemEnabled = setLoginItemEnabled
+        self.openLoginItemSettings = openLoginItemSettings
+        self.presentLoginItemError = presentLoginItemError ?? Self.presentDefaultLoginItemError
         self.cacheDirectory = cacheDirectory
         self.makeLauncher = makeLauncher
         self.presentLaunchFailures = presentLaunchFailures ?? Self.presentDefaultLaunchFailures
@@ -1783,7 +1853,6 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     @objc
     private func selectLaunchConfiguration(_ button: ConfigurationActionButton) {
-        contextMenu.cancelTracking()
         applyLaunchConfigurationSelection(button.representedSelection)
     }
 
@@ -1820,7 +1889,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     private func finishCatalogSelection() {
         onCatalogChange?()
-        contextMenu = makeContextMenu()
+        rebuildContextMenu()
         refreshConfiguration()
     }
 

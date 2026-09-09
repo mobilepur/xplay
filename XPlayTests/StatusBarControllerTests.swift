@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import ServiceManagement
 import XCTest
 @testable import XPlay
 
@@ -519,7 +520,7 @@ final class StatusBarControllerTests: XCTestCase {
                 "",
                 "Projects", "No projects yet",
                 "",
-                "Settings", "Menu Bar Icon", "Left Click", "Right Click", "Automatically Select Latest Branch", "Accept Macros",
+                "Settings", "Menu Bar Icon", "Left Click", "Right Click", "Automatically Select Latest Branch", "Accept Macros", "Start at Login",
                 "",
                 "About", "XPlay", "Report a Problem…",
                 "",
@@ -973,7 +974,7 @@ final class StatusBarControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testSelectingSchemeForPlayUpdatesMenuSelection() throws {
+    func testSelectingSchemeForPlayKeepsMenuOpenAndUpdatesSelection() throws {
         try withState { catalog, settings in
             let mac = XcodeDestination(platform: .macOS, id: "mac", name: "My Mac")
             let simulator = XcodeDestination(
@@ -1004,14 +1005,41 @@ final class StatusBarControllerTests: XCTestCase {
                 }
             )
 
-            schemeButton.performClick(nil)
+            let openMenu = controller.contextMenu
+            var didSelectScheme = false
+            var didFinishTrackingCheck = false
+            let dismissalTimer = Timer(timeInterval: 0.3, repeats: false) { _ in
+                MainActor.assumeIsolated {
+                    didFinishTrackingCheck = true
+                    openMenu.cancelTracking()
+                }
+            }
+            dismissalTimer.fireDate = .distantFuture
+            let selectionTimer = Timer(timeInterval: 0.1, repeats: false) { _ in
+                MainActor.assumeIsolated {
+                    didSelectScheme = true
+                    schemeButton.performClick(nil)
+                    dismissalTimer.fireDate = Date(timeIntervalSinceNow: 0.2)
+                }
+            }
+            defer {
+                selectionTimer.invalidate()
+                dismissalTimer.invalidate()
+            }
+            RunLoop.main.add(selectionTimer, forMode: .eventTracking)
+            RunLoop.main.add(dismissalTimer, forMode: .eventTracking)
+            openMenu.popUp(positioning: nil, at: NSPoint(x: 200, y: 200), in: nil)
+
+            XCTAssertTrue(didSelectScheme, "The scheme action must run while the menu is tracking")
+            XCTAssertTrue(didFinishTrackingCheck, "Selecting a scheme must not end menu tracking")
+            XCTAssertTrue(controller.contextMenu === openMenu)
 
             XCTAssertEqual(
                 catalog.selectedProject?.selectedLaunchConfiguration?.scheme,
                 "Example-iOS"
             )
             XCTAssertEqual(presentedDeviceMenuCount, 0)
-            let refreshedSchemes = controller.contextMenu.items.filter {
+            let refreshedSchemes = openMenu.items.filter {
                 $0.title.hasPrefix("Example-")
             }
             XCTAssertEqual(refreshedSchemes.map(\.state), [.off, .on])
@@ -1070,6 +1098,107 @@ final class StatusBarControllerTests: XCTestCase {
                 catalog.selectedProject?.selectedLaunchConfiguration?.scheme,
                 "Example-iOS"
             )
+        }
+    }
+
+    @MainActor
+    func testStartAtLoginSwitchUpdatesServiceAndReflectsExternalChanges() throws {
+        var status = SMAppService.Status.notRegistered
+        var changes: [Bool] = []
+        let controller = StatusBarController(
+            loginItemStatus: { status },
+            setLoginItemEnabled: { enabled in
+                changes.append(enabled)
+                status = enabled ? .enabled : .notRegistered
+            }
+        )
+        let menu = controller.contextMenu
+        let item = try XCTUnwrap(menu.items.first { $0.title == "Start at Login" })
+        let row = try XCTUnwrap(item.view)
+        let toggle = try XCTUnwrap(row.subviews.compactMap { $0 as? MenuTintedSwitch }.first)
+        let label = try XCTUnwrap(row.subviews.compactMap { $0 as? NSTextField }.first)
+        row.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(toggle.frame.minX, label.frame.maxX)
+        XCTAssertEqual(toggle.accessibilityLabel(), "Start at Login")
+        XCTAssertEqual(toggle.state, .off)
+        XCTAssertTrue(changes.isEmpty)
+
+        toggle.performClick(nil)
+        XCTAssertEqual(status, .enabled)
+        XCTAssertEqual(toggle.state, .on)
+        toggle.performClick(nil)
+        XCTAssertEqual(status, .notRegistered)
+        XCTAssertEqual(toggle.state, .off)
+        XCTAssertEqual(changes, [true, false])
+        XCTAssertTrue(controller.contextMenu === menu)
+
+        status = .enabled
+        controller.menuWillOpen(menu)
+        XCTAssertEqual(toggle.state, .on)
+        status = .notRegistered
+        controller.menuWillOpen(menu)
+        XCTAssertEqual(toggle.state, .off)
+        XCTAssertEqual(changes, [true, false])
+    }
+
+    @MainActor
+    func testStartAtLoginFailureRestoresActualServiceStateAndReportsError() throws {
+        for status in [SMAppService.Status.notRegistered, .enabled] {
+            var reportedErrors: [Error] = []
+            let controller = StatusBarController(
+                loginItemStatus: { status },
+                setLoginItemEnabled: { _ in throw CocoaError(.fileWriteNoPermission) },
+                presentLoginItemError: { reportedErrors.append($0) }
+            )
+            let item = try XCTUnwrap(controller.contextMenu.items.first { $0.title == "Start at Login" })
+            let toggle = try XCTUnwrap(item.view?.subviews.compactMap { $0 as? MenuTintedSwitch }.first)
+            toggle.performClick(nil)
+            XCTAssertEqual(toggle.state, status == .enabled ? .on : .off)
+            XCTAssertEqual(reportedErrors.count, 1)
+            XCTAssertEqual((reportedErrors.first as? CocoaError)?.code, .fileWriteNoPermission)
+        }
+    }
+
+    @MainActor
+    func testStartAtLoginPendingApprovalOpensSystemSettingsWithoutRegisteringAgain() throws {
+        var registrationCount = 0
+        var settingsOpenCount = 0
+        let controller = StatusBarController(
+            loginItemStatus: { .requiresApproval },
+            setLoginItemEnabled: { _ in registrationCount += 1 },
+            openLoginItemSettings: { settingsOpenCount += 1 }
+        )
+        let item = try XCTUnwrap(controller.contextMenu.items.first { $0.title == "Start at Login" })
+        let toggle = try XCTUnwrap(item.view?.subviews.compactMap { $0 as? MenuTintedSwitch }.first)
+        XCTAssertEqual(toggle.state, .off)
+        XCTAssertTrue(toggle.toolTip?.contains("System Settings") == true)
+        toggle.performClick(nil)
+        XCTAssertEqual(toggle.state, .off)
+        XCTAssertEqual(registrationCount, 0)
+        XCTAssertEqual(settingsOpenCount, 1)
+    }
+
+    @MainActor
+    func testStartAtLoginRegistrationRequiringApprovalDoesNotShowEnabled() throws {
+        for registrationThrows in [false, true] {
+            var status = SMAppService.Status.notRegistered
+            var settingsOpenCount = 0
+            var errorCount = 0
+            let controller = StatusBarController(
+                loginItemStatus: { status },
+                setLoginItemEnabled: { _ in
+                    status = .requiresApproval
+                    if registrationThrows { throw CocoaError(.fileWriteNoPermission) }
+                },
+                openLoginItemSettings: { settingsOpenCount += 1 },
+                presentLoginItemError: { _ in errorCount += 1 }
+            )
+            let item = try XCTUnwrap(controller.contextMenu.items.first { $0.title == "Start at Login" })
+            let toggle = try XCTUnwrap(item.view?.subviews.compactMap { $0 as? MenuTintedSwitch }.first)
+            toggle.performClick(nil)
+            XCTAssertEqual(toggle.state, .off)
+            XCTAssertEqual(settingsOpenCount, 1)
+            XCTAssertEqual(errorCount, 0)
         }
     }
 

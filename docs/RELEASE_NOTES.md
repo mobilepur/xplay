@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 1.1.7 — 2026-09-09
+
+### Added
+
+- Add Start at Login to Settings, with the current macOS login-item status and
+  guidance when approval in System Settings is required.
+
+### Fixed
+
+- Keep the XPlay menu open when switching schemes and update the selected scheme
+  in the visible menu.
+
 ## 1.1.6 — 2026-09-08
 
 ### Fixed
