@@ -15,8 +15,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: de.mobilepur.XPlay
         PRODUCT_NAME: XPlay
-        MARKETING_VERSION: "1.1.6"
-        CURRENT_PROJECT_VERSION: "10"
+        MARKETING_VERSION: "1.1.7"
+        CURRENT_PROJECT_VERSION: "11"
         SWIFT_VERSION: "5.0"
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: XPlay
